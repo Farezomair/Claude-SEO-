@@ -21,8 +21,13 @@ from .crypto import encrypt
 from .database import Base, engine, get_db
 from .jobs import start_audit_async
 from .migrations import ensure_columns
-from .models import Approval, Audit, AuditIssue, Content, Fix, JobRun, RunLog, Site, SiteConnection
+from .models import (
+    Approval, Audit, AuditIssue, Content, Fix, JobRun, Report, RunLog, Site, SiteConnection, utcnow,
+)
+from .scheduler import ENABLED as SCHEDULER_ENABLED
+from .scheduler import INTERVAL_DAYS, is_due, start_scheduler
 from .seo_technical import start_metafix_async
+from .weekly import start_weekly_async
 from .wordpress import WordPressClient, WordPressError
 
 # Whether approved content is sent to WordPress as a draft (safe — needs a final
@@ -32,6 +37,9 @@ CONTENT_PUBLISH_STATUS = os.getenv("CONTENT_PUBLISH_STATUS", "draft")
 # Create tables on startup, then add any columns missing from existing tables.
 Base.metadata.create_all(bind=engine)
 ensure_columns(engine)
+
+# Start the weekly scheduler (set WEEKLY_ENABLED=false to disable).
+start_scheduler()
 
 app = FastAPI(title="SEO Agent System")
 
@@ -137,7 +145,7 @@ def site_detail(
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
         return RedirectResponse("/sites", status_code=303)
-    if tab not in {"audit", "fixes", "content", "settings"}:
+    if tab not in {"audit", "fixes", "content", "reports", "settings"}:
         tab = "audit"
 
     ctx = {
@@ -154,6 +162,11 @@ def site_detail(
         "connection_active": False,
         "latest_draft_run": None,
         "drafts": [],
+        "reports": [],
+        "latest_weekly_run": None,
+        "scheduler_enabled": SCHEDULER_ENABLED,
+        "interval_days": INTERVAL_DAYS,
+        "weekly_due": is_due(db, site_id),
         "pending_count": db.query(Approval).filter(Approval.status == "pending").count(),
     }
 
@@ -192,6 +205,17 @@ def site_detail(
             .order_by(Content.created_at.desc()).limit(30).all()
         )
 
+    elif tab == "reports":
+        ctx["latest_weekly_run"] = (
+            db.query(JobRun)
+            .filter(JobRun.site_id == site_id, JobRun.kind == "weekly")
+            .order_by(JobRun.created_at.desc()).first()
+        )
+        ctx["reports"] = (
+            db.query(Report).filter(Report.site_id == site_id)
+            .order_by(Report.created_at.desc()).limit(20).all()
+        )
+
     elif tab == "settings":
         ctx["connection"] = (
             db.query(SiteConnection).filter(SiteConnection.site_id == site_id).first()
@@ -199,6 +223,29 @@ def site_detail(
         ctx["connection_active"] = get_connection(site_id, site.url, site.name) is not None
 
     return templates.TemplateResponse("site_detail.html", ctx)
+
+
+@app.post("/sites/{site_id}/run-weekly")
+def run_weekly_now(site_id: int, request: Request, db: Session = Depends(get_db)):
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+
+    already_running = (
+        db.query(JobRun)
+        .filter(JobRun.site_id == site_id, JobRun.kind == "weekly", JobRun.status == "running")
+        .first()
+    )
+    if not already_running:
+        run = JobRun(site_id=site_id, kind="weekly", status="running", summary="Weekly run starting…")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        start_weekly_async(site_id, run.id)
+
+    return RedirectResponse(f"/sites/{site_id}?tab=reports", status_code=303)
 
 
 @app.post("/sites/{site_id}/draft-content")
@@ -292,7 +339,7 @@ def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
         ))
 
     appr.status = "approved"
-    appr.decided_at = datetime.now(timezone.utc)
+    appr.decided_at = utcnow()
     db.commit()
     return RedirectResponse("/approvals?notice=approved", status_code=303)
 
@@ -312,7 +359,7 @@ def reject(approval_id: int, request: Request, db: Session = Depends(get_db)):
         except Exception:
             pass
     appr.status = "rejected"
-    appr.decided_at = datetime.now(timezone.utc)
+    appr.decided_at = utcnow()
     db.commit()
     return RedirectResponse("/approvals?notice=rejected", status_code=303)
 

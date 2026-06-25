@@ -18,7 +18,9 @@ from .database import Base
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    # Naive UTC, so it compares cleanly with values read back from timezone-naive
+    # DateTime columns (used by the weekly scheduler's "is it due?" math).
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class Site(Base):
@@ -124,6 +126,18 @@ class Approval(Base):
     decided_at = Column(DateTime, nullable=True)
 
     site = relationship("Site")
+
+
+class Report(Base):
+    """A weekly progress summary for a site (Stage 5)."""
+
+    __tablename__ = "reports"
+
+    id = Column(Integer, primary_key=True)
+    site_id = Column(Integer, ForeignKey("sites.id", ondelete="CASCADE"), nullable=False)
+    summary = Column(Text, default="")     # one-line headline
+    body_html = Column(Text, default="")   # full report
+    created_at = Column(DateTime, default=utcnow)
 
 
 class Content(Base):

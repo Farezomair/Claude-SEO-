@@ -10,6 +10,9 @@
   {% if tab == 'content' and latest_draft_run and latest_draft_run.status == 'running' %}
   <meta http-equiv="refresh" content="6">
   {% endif %}
+  {% if tab == 'reports' and latest_weekly_run and latest_weekly_run.status == 'running' %}
+  <meta http-equiv="refresh" content="8">
+  {% endif %}
 {% endblock %}
 {% block body %}
 <div class="container">
@@ -21,6 +24,7 @@
     <a href="/sites/{{ site.id }}?tab=audit"    class="{{ 'active' if tab == 'audit' else '' }}">Audit</a>
     <a href="/sites/{{ site.id }}?tab=fixes"     class="{{ 'active' if tab == 'fixes' else '' }}">Fixes</a>
     <a href="/sites/{{ site.id }}?tab=content"   class="{{ 'active' if tab == 'content' else '' }}">Content</a>
+    <a href="/sites/{{ site.id }}?tab=reports"   class="{{ 'active' if tab == 'reports' else '' }}">Reports</a>
     <a href="/sites/{{ site.id }}?tab=settings"  class="{{ 'active' if tab == 'settings' else '' }}">Settings</a>
   </nav>
 
@@ -118,6 +122,46 @@
           </tbody>
         </table>
       </div>
+    {% endif %}
+  {% elif tab == 'reports' %}
+    {% set running = latest_weekly_run and latest_weekly_run.status == 'running' %}
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <strong>Weekly schedule:</strong>
+          {% if scheduler_enabled %}<span style="color:#4ade80;">on</span> — runs itself every {{ interval_days }} days{% else %}<span class="muted">off</span>{% endif %}
+          <br>
+          <span class="muted">
+            {% if latest_weekly_run %}Last run: {{ latest_weekly_run.created_at.strftime('%Y-%m-%d %H:%M UTC') if latest_weekly_run.created_at else '' }} &middot; {{ latest_weekly_run.status }}{% else %}No weekly run yet.{% endif %}
+          </span>
+        </div>
+        <form method="post" action="/sites/{{ site.id }}/run-weekly">
+          <button class="btn" type="submit" {{ 'disabled' if running else '' }}>
+            {{ 'Running…' if running else 'Run weekly now' }}
+          </button>
+        </form>
+      </div>
+    </div>
+
+    {% if running %}
+      <div class="empty">Weekly run in progress (audit → fixes → report) — this page refreshes automatically.</div>
+    {% elif latest_weekly_run and latest_weekly_run.status == 'failed' %}
+      <div class="card"><div class="error">{{ latest_weekly_run.summary }}</div></div>
+    {% endif %}
+
+    {% if reports %}
+      {% for r in reports %}
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:baseline;">
+          <h2 style="margin-bottom:4px;">Weekly report</h2>
+          <span class="muted">{{ r.created_at.strftime('%Y-%m-%d %H:%M UTC') if r.created_at else '' }}</span>
+        </div>
+        <p class="muted" style="margin-top:0;">{{ r.summary }}</p>
+        <div>{{ r.body_html | safe }}</div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty" style="margin-top:8px;">No reports yet. Click <strong>Run weekly now</strong> to run the full loop (audit, fixes, report) immediately, or wait for the schedule.</div>
     {% endif %}
   {% elif tab == 'content' %}
     {% set running = latest_draft_run and latest_draft_run.status == 'running' %}
