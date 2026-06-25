@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Websites &middot; SEO Agent System{% endblock %}
+{% block body %}
+<div class="container">
+  <h1>Websites</h1>
+  <p class="muted" style="margin-top:0;">Each site gets its own private workspace.</p>
+
+  <div class="card">
+    <h2>Add a website</h2>
+    <form method="post" action="/sites">
+      <div class="field">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" placeholder="Acme Co." required>
+      </div>
+      <div class="field">
+        <label for="url">URL</label>
+        <input type="url" id="url" name="url" placeholder="https://acme.com" required>
+      </div>
+      <button class="btn" type="submit">Add website</button>
+    </form>
+  </div>
+
+  {% if sites %}
+  <div class="card" style="padding:0;">
+    <table>
+      <thead>
+        <tr><th>Name</th><th>URL</th><th>Added</th></tr>
+      </thead>
+      <tbody>
+        {% for site in sites %}
+        <tr>
+          <td><a href="/sites/{{ site.id }}">{{ site.name }}</a></td>
+          <td class="muted">{{ site.url }}</td>
+          <td class="muted">{{ site.created_at.strftime('%Y-%m-%d') if site.created_at else '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">No websites yet. Add your first one above.</div>
+  {% endif %}
+</div>
+{% endblock %}
