@@ -79,6 +79,25 @@ class Content(Base):
     site = relationship("Site", back_populates="contents")
 
 
+class AuditIssue(Base):
+    """A single finding from an audit run (Stage 2 onward).
+
+    Tied to both an audit and a site, so findings are isolated per site and we
+    can show the results of one specific audit run.
+    """
+
+    __tablename__ = "audit_issues"
+
+    id = Column(Integer, primary_key=True)
+    site_id = Column(Integer, ForeignKey("sites.id", ondelete="CASCADE"), nullable=False)
+    audit_id = Column(Integer, ForeignKey("audits.id", ondelete="CASCADE"), nullable=False)
+    category = Column(String(50), nullable=False)   # broken_page, broken_link, structure
+    severity = Column(String(20), default="medium")  # high, medium, low
+    url = Column(String(1000), default="")           # page where the issue was found
+    detail = Column(Text, default="")
+    created_at = Column(DateTime, default=utcnow)
+
+
 class RunLog(Base):
     """A short log line of what a run did and why — the audit trail."""
 

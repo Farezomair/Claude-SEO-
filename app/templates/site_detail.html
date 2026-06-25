@@ -1,5 +1,10 @@
 {% extends "base.html" %}
 {% block title %}{{ site.name }} &middot; SEO Agent System{% endblock %}
+{% block head %}
+  {% if tab == 'audit' and latest_audit and latest_audit.status == 'running' %}
+  <meta http-equiv="refresh" content="5">
+  {% endif %}
+{% endblock %}
 {% block body %}
 <div class="container">
   <p class="muted" style="margin-bottom:4px;"><a href="/sites">&larr; All websites</a></p>
@@ -14,7 +19,52 @@
   </nav>
 
   {% if tab == 'audit' %}
-    <div class="empty">No audits yet. The Website auditor arrives in Stage 2.</div>
+    {% set running = latest_audit and latest_audit.status == 'running' %}
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
+      <div>
+        {% if latest_audit %}
+          <span class="muted">Last run:</span>
+          {{ latest_audit.created_at.strftime('%Y-%m-%d %H:%M UTC') if latest_audit.created_at else '' }}
+          &middot; <strong>{{ latest_audit.status }}</strong>
+        {% else %}
+          <span class="muted">No audits run yet.</span>
+        {% endif %}
+      </div>
+      <form method="post" action="/sites/{{ site.id }}/audit">
+        <button class="btn" type="submit" {{ 'disabled' if running else '' }}>
+          {{ 'Audit running…' if running else 'Run audit' }}
+        </button>
+      </form>
+    </div>
+
+    {% if running %}
+      <div class="empty">Audit in progress — this page refreshes automatically.</div>
+    {% elif latest_audit and latest_audit.status == 'failed' %}
+      <div class="card"><div class="error">{{ latest_audit.summary }}</div></div>
+    {% elif latest_audit and latest_audit.status == 'completed' %}
+      <div class="card"><p style="margin:0;">{{ latest_audit.summary }}</p></div>
+      {% if issues %}
+        <div class="card" style="padding:0;">
+          <table>
+            <thead><tr><th>Severity</th><th>Type</th><th>Detail</th><th>Page</th></tr></thead>
+            <tbody>
+              {% for issue in issues %}
+              <tr>
+                <td>{{ issue.severity }}</td>
+                <td>{{ issue.category.replace('_', ' ') }}</td>
+                <td>{{ issue.detail }}</td>
+                <td class="muted">{{ issue.url }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty">No issues found. 🎉</div>
+      {% endif %}
+    {% else %}
+      <div class="empty">Click <strong>Run audit</strong> to crawl this site for broken pages, broken links, and missing header/footer.</div>
+    {% endif %}
   {% elif tab == 'fixes' %}
     <div class="empty">No fixes yet. The SEO technical agent arrives in Stage 3.</div>
   {% elif tab == 'content' %}
