@@ -4,6 +4,9 @@
   {% if tab == 'audit' and latest_audit and latest_audit.status == 'running' %}
   <meta http-equiv="refresh" content="5">
   {% endif %}
+  {% if tab == 'fixes' and latest_fix_run and latest_fix_run.status == 'running' %}
+  <meta http-equiv="refresh" content="6">
+  {% endif %}
 {% endblock %}
 {% block body %}
 <div class="container">
@@ -66,16 +69,89 @@
       <div class="empty">Click <strong>Run audit</strong> to crawl this site for broken pages, broken links, and missing header/footer.</div>
     {% endif %}
   {% elif tab == 'fixes' %}
-    <div class="empty">No fixes yet. The SEO technical agent arrives in Stage 3.</div>
+    {% set running = latest_fix_run and latest_fix_run.status == 'running' %}
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
+      <div>
+        {% if latest_fix_run %}
+          <span class="muted">Last run:</span>
+          {{ latest_fix_run.created_at.strftime('%Y-%m-%d %H:%M UTC') if latest_fix_run.created_at else '' }}
+          &middot; <strong>{{ latest_fix_run.status }}</strong>
+        {% else %}
+          <span class="muted">No fix runs yet.</span>
+        {% endif %}
+      </div>
+      <form method="post" action="/sites/{{ site.id }}/fix-metas">
+        <button class="btn" type="submit" {{ 'disabled' if running or not connection_active else '' }}>
+          {{ 'Running…' if running else 'Run meta fixes' }}
+        </button>
+      </form>
+    </div>
+
+    {% if not connection_active %}
+      <div class="card"><div class="error">No WordPress connection yet. Set it up in the <a href="/sites/{{ site.id }}?tab=settings">Settings</a> tab before running fixes.</div></div>
+    {% elif running %}
+      <div class="empty">Applying meta fixes — this page refreshes automatically.</div>
+    {% elif latest_fix_run and latest_fix_run.status == 'failed' %}
+      <div class="card"><div class="error">{{ latest_fix_run.summary }}</div></div>
+    {% elif latest_fix_run %}
+      <div class="card"><p style="margin:0;">{{ latest_fix_run.summary }}</p></div>
+    {% else %}
+      <div class="empty">Click <strong>Run meta fixes</strong> to write SEO-improved titles and descriptions to pages that need them. Each change is verified before it's marked done.</div>
+    {% endif %}
+
+    {% if fixes %}
+      <div class="card" style="padding:0; margin-top:16px;">
+        <table>
+          <thead><tr><th>Status</th><th>Field</th><th>New value</th><th>Page</th></tr></thead>
+          <tbody>
+            {% for fix in fixes %}
+            <tr>
+              <td>{{ fix.status }}</td>
+              <td>{{ fix.field.replace('_', ' ') if fix.field else '' }}</td>
+              <td>{{ fix.new_value }}</td>
+              <td class="muted">{{ fix.page_ref }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
   {% elif tab == 'content' %}
     <div class="empty">No content yet. The content agent arrives in Stage 4.</div>
   {% elif tab == 'settings' %}
+    {% if notice == 'saved' %}<div class="card"><p style="margin:0; color:#4f8cff;">Connection saved.</p></div>{% endif %}
+    {% if notice == 'test_ok' %}<div class="card"><p style="margin:0; color:#4ade80;">✓ Connection works — the app can reach WordPress.</p></div>{% endif %}
+    {% if notice and notice.startswith('test_fail') %}<div class="card"><div class="error">Connection failed (HTTP {{ notice.split('_')[-1] }}). Check the URL, username, application password, and that the helper plugin is installed.</div></div>{% endif %}
+    {% if notice == 'test_none' %}<div class="card"><div class="error">No connection details saved yet. Fill in and save the form below first.</div></div>{% endif %}
+
+    <div class="card">
+      <h2>WordPress connection</h2>
+      <p class="muted" style="margin-top:0;">
+        How the agents read and update this site. Status:
+        {% if connection_active %}<strong style="color:#4ade80;">connected</strong>{% else %}<strong style="color:#ff6b6b;">not connected</strong>{% endif %}
+      </p>
+      <form method="post" action="/sites/{{ site.id }}/connection">
+        <div class="field">
+          <label for="wp_url">WordPress URL</label>
+          <input type="url" id="wp_url" name="wp_url" value="{{ connection.wp_url if connection else site.url }}" required>
+        </div>
+        <div class="field">
+          <label for="wp_username">Admin username</label>
+          <input type="text" id="wp_username" name="wp_username" value="{{ connection.wp_username if connection else '' }}" required>
+        </div>
+        <div class="field">
+          <label for="wp_app_password">Application password {% if connection and connection.wp_app_password_enc %}<span class="muted">(saved — leave blank to keep)</span>{% endif %}</label>
+          <input type="password" id="wp_app_password" name="wp_app_password" autocomplete="off" placeholder="xxxx xxxx xxxx xxxx xxxx xxxx">
+        </div>
+        <button class="btn" type="submit">Save connection</button>
+        <button class="btn secondary" type="submit" formaction="/sites/{{ site.id }}/test-connection">Test connection</button>
+      </form>
+    </div>
+
     <div class="card">
       <h2>Site details</h2>
       <p class="muted">Name</p>
       <p>{{ site.name }}</p>
-      <p class="muted">URL</p>
-      <p>{{ site.url }}</p>
       <p class="muted">Added</p>
       <p>{{ site.created_at.strftime('%Y-%m-%d %H:%M UTC') if site.created_at else 'unknown' }}</p>
     </div>

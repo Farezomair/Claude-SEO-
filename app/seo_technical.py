@@ -1,0 +1,150 @@
+"""SEO technical agent (Stage 3) — meta title/description fixes.
+
+Flow per run, against the live WordPress site (Yoast):
+1. Scan published pages/posts for missing / too-short / too-long meta titles
+   and descriptions.
+2. For each page that needs work, ask Claude to write a better title/description
+   from the page's actual content.
+3. Store the OLD value (reversible), then write the new one via the REST API.
+4. QC: re-read the page and confirm the new value is live before marking the
+   fix verified.
+
+Guardrails: a hard cap on the number of fixes per run (MAX_FIXES) and a
+verify-before-done QC step. Safe, reversible changes only — no approval gate.
+"""
+import threading
+
+from .brain import generate_meta
+from .database import SessionLocal
+from .models import Fix, JobRun, RunLog
+from .wordpress import YOAST_DESC_KEY, YOAST_TITLE_KEY, WordPressClient, WordPressError
+
+# Hard caps / thresholds (guardrails).
+MAX_FIXES = 10
+TITLE_MIN, TITLE_MAX = 30, 60
+DESC_MIN, DESC_MAX = 70, 160
+
+
+def _evaluate(meta: dict) -> list[tuple[str, str]]:
+    """Return [(field, reason), ...] for meta that should be improved."""
+    issues = []
+    title = (meta.get(YOAST_TITLE_KEY) or "").strip()
+    desc = (meta.get(YOAST_DESC_KEY) or "").strip()
+    # A Yoast title containing %%placeholders%% is the default template, not a
+    # real custom title — treat it as missing.
+    if not title or "%%" in title:
+        issues.append(("meta_title", "no custom title set"))
+    elif len(title) > TITLE_MAX:
+        issues.append(("meta_title", f"too long ({len(title)} chars)"))
+    elif len(title) < TITLE_MIN:
+        issues.append(("meta_title", f"too short ({len(title)} chars)"))
+
+    if not desc:
+        issues.append(("meta_description", "missing"))
+    elif len(desc) > DESC_MAX:
+        issues.append(("meta_description", f"too long ({len(desc)} chars)"))
+    elif len(desc) < DESC_MIN:
+        issues.append(("meta_description", f"too short ({len(desc)} chars)"))
+    return issues
+
+
+def run_metafix(site_id: int, run_id: int, conn: dict) -> None:
+    db = SessionLocal()
+    fixes_made = 0
+    pages_scanned = 0
+    try:
+        run = db.get(JobRun, run_id)
+        wp = WordPressClient(conn["url"], conn["username"], conn["app_password"])
+
+        ok, code = wp.test()
+        if not ok:
+            run.status = "failed"
+            run.summary = f"WordPress connection failed (HTTP {code}). Check the connection in Settings."
+            db.add(RunLog(site_id=site_id, message=f"Meta-fix aborted: WP auth failed (HTTP {code})."))
+            db.commit()
+            return
+
+        items = wp.list_content(limit=60)
+        for item in items:
+            if fixes_made >= MAX_FIXES:
+                break
+            pages_scanned += 1
+            issues = _evaluate(item["meta"])
+            if not issues:
+                continue
+
+            # One generation per page covers both title and description.
+            try:
+                suggestion = generate_meta(
+                    item["title"], item["link"], item["content_text"], conn.get("site_name", "")
+                )
+            except Exception as exc:
+                db.add(RunLog(site_id=site_id,
+                              message=f"Skipped {item['link']}: meta generation failed ({exc.__class__.__name__})."))
+                db.commit()
+                continue
+
+            for field, reason in issues:
+                if fixes_made >= MAX_FIXES:
+                    break
+                if field == "meta_title":
+                    key, new_val = YOAST_TITLE_KEY, suggestion["title"]
+                else:
+                    key, new_val = YOAST_DESC_KEY, suggestion["description"]
+                if not new_val:
+                    continue
+                old_val = (item["meta"].get(key) or "").strip()
+
+                # Verify-before-write reversibility: capture old, then write.
+                try:
+                    wp.update_meta(item["kind"], item["id"], {key: new_val})
+                except WordPressError as exc:
+                    db.add(Fix(
+                        site_id=site_id, title=f"{field.replace('_', ' ')} — {item['title'] or item['link']}",
+                        status="failed", field=field, page_ref=item["link"],
+                        old_value=old_val, new_value=new_val,
+                        detail=f"{reason}. Write failed: {exc}",
+                    ))
+                    db.commit()
+                    continue
+
+                # QC re-check: confirm the change is actually live.
+                try:
+                    live = wp.get_meta(item["kind"], item["id"])
+                    verified = (live.get(key) or "").strip() == new_val.strip()
+                except WordPressError:
+                    verified = False
+
+                db.add(Fix(
+                    site_id=site_id,
+                    title=f"Updated {field.replace('_', ' ')} — {item['title'] or item['link']}",
+                    status="verified" if verified else "applied",
+                    field=field, page_ref=item["link"],
+                    old_value=old_val, new_value=new_val,
+                    detail=f"{reason}. QC: {'passed' if verified else 'could not confirm'}.",
+                ))
+                db.commit()
+                fixes_made += 1
+
+        run.status = "completed"
+        run.summary = (
+            f"Scanned {pages_scanned} pages, applied {fixes_made} meta fix(es) "
+            f"(cap {MAX_FIXES})."
+        )
+        db.add(RunLog(site_id=site_id, message=f"Meta-fix run #{run_id} completed — {run.summary}"))
+        db.commit()
+    except Exception as exc:  # never let the thread die silently
+        run = db.get(JobRun, run_id)
+        if run:
+            run.status = "failed"
+            run.summary = f"Run failed: {exc.__class__.__name__}: {exc}"
+            db.add(RunLog(site_id=site_id, message=f"Meta-fix run #{run_id} failed: {exc}"))
+            db.commit()
+    finally:
+        db.close()
+
+
+def start_metafix_async(site_id: int, run_id: int, conn: dict) -> None:
+    threading.Thread(
+        target=run_metafix, args=(site_id, run_id, conn), daemon=True
+    ).start()

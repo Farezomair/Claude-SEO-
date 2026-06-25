@@ -57,11 +57,49 @@ class Fix(Base):
     id = Column(Integer, primary_key=True)
     site_id = Column(Integer, ForeignKey("sites.id", ondelete="CASCADE"), nullable=False)
     title = Column(String(500), nullable=False)
-    status = Column(String(50), default="proposed")
+    status = Column(String(50), default="proposed")  # proposed/applied/verified/failed/reverted
     detail = Column(Text, default="")
+    page_ref = Column(String(1000), default="")      # page URL the change applies to
+    field = Column(String(100), default="")          # e.g. meta_title, meta_description
+    old_value = Column(Text, default="")             # stored so the change is reversible
+    new_value = Column(Text, default="")
     created_at = Column(DateTime, default=utcnow)
 
     site = relationship("Site", back_populates="fixes")
+
+
+class SiteConnection(Base):
+    """Per-site WordPress connection, entered in the Settings tab.
+
+    The app password is stored encrypted (see app/crypto.py). Adding a new site
+    never touches Railway — the owner pastes the connection here in the browser.
+    """
+
+    __tablename__ = "site_connections"
+
+    id = Column(Integer, primary_key=True)
+    site_id = Column(Integer, ForeignKey("sites.id", ondelete="CASCADE"), unique=True, nullable=False)
+    wp_url = Column(String(500), default="")
+    wp_username = Column(String(255), default="")
+    wp_app_password_enc = Column(Text, default="")   # encrypted, never plain text
+    updated_at = Column(DateTime, default=utcnow)
+
+
+class JobRun(Base):
+    """A run of an agent for a site (e.g. the SEO technical meta-fix run).
+
+    Tracks running/completed/failed status so the UI can show progress, the
+    same way audits do.
+    """
+
+    __tablename__ = "job_runs"
+
+    id = Column(Integer, primary_key=True)
+    site_id = Column(Integer, ForeignKey("sites.id", ondelete="CASCADE"), nullable=False)
+    kind = Column(String(50), default="metafix")
+    status = Column(String(50), default="running")   # running/completed/failed
+    summary = Column(Text, default="")
+    created_at = Column(DateTime, default=utcnow)
 
 
 class Content(Base):
