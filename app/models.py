@@ -96,10 +96,34 @@ class JobRun(Base):
 
     id = Column(Integer, primary_key=True)
     site_id = Column(Integer, ForeignKey("sites.id", ondelete="CASCADE"), nullable=False)
-    kind = Column(String(50), default="metafix")
+    kind = Column(String(50), default="metafix")     # metafix / content_draft
     status = Column(String(50), default="running")   # running/completed/failed
     summary = Column(Text, default="")
     created_at = Column(DateTime, default=utcnow)
+
+
+class Approval(Base):
+    """A proposed change waiting for a human yes/no (the safety gate, Stage 4).
+
+    Risky actions — content publishing especially — create a pending Approval
+    instead of going live. The owner approves or rejects on the Approvals
+    screen. ``payload`` is JSON describing what to do on approval (e.g. which
+    Content row to publish).
+    """
+
+    __tablename__ = "approvals"
+
+    id = Column(Integer, primary_key=True)
+    site_id = Column(Integer, ForeignKey("sites.id", ondelete="CASCADE"), nullable=False)
+    kind = Column(String(50), default="content")
+    title = Column(String(500), default="")
+    summary = Column(Text, default="")
+    payload = Column(Text, default="")              # JSON
+    status = Column(String(20), default="pending")  # pending/approved/rejected
+    created_at = Column(DateTime, default=utcnow)
+    decided_at = Column(DateTime, nullable=True)
+
+    site = relationship("Site")
 
 
 class Content(Base):

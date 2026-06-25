@@ -72,3 +72,38 @@ Respond with ONLY a JSON object, no preamble and no markdown, in exactly this sh
     title = str(data.get("title", "")).strip().strip('"')[:TITLE_MAX]
     description = str(data.get("description", "")).strip().strip('"')[:DESC_MAX]
     return {"title": title, "description": description}
+
+
+def generate_article(site_name: str, site_url: str, topic: str = "") -> dict:
+    """Draft a blog post. Returns {"title", "meta_description", "body_html"}."""
+    topic_line = f"Write about this topic: {topic}" if topic.strip() else \
+        "Choose a useful, search-worthy topic that fits this business and its likely customers."
+
+    prompt = f"""You are an expert SEO content writer creating a blog post for a business website.
+
+Business: {site_name}
+Website: {site_url}
+{topic_line}
+
+Write a complete, genuinely useful blog post (about 600-800 words). Be concrete and helpful to a real reader considering this business's services. Avoid fluff and generic filler.
+
+Format the body as simple HTML using only <h2>, <h3>, <p>, <ul>, <li>, and <strong> tags. Do NOT include an <h1> (the title is separate), and do NOT wrap it in <html> or <body>.
+
+Respond with ONLY a JSON object, no preamble and no markdown fences, in exactly this shape:
+{{"title": "...", "meta_description": "...", "body_html": "..."}}
+- title: under 60 characters, compelling.
+- meta_description: 140-155 characters."""
+
+    response = _get_client().messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=4000,
+        system="You are an SEO content writer. You respond only with a single JSON object and nothing else.",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    text = next((b.text for b in response.content if b.type == "text"), "")
+    data = _extract_json(text)
+    return {
+        "title": str(data.get("title", "")).strip().strip('"')[:TITLE_MAX],
+        "meta_description": str(data.get("meta_description", "")).strip().strip('"')[:DESC_MAX],
+        "body_html": str(data.get("body_html", "")).strip(),
+    }

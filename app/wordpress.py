@@ -90,6 +90,18 @@ class WordPressClient:
         if r.status_code not in (200, 201):
             raise WordPressError(f"HTTP {r.status_code}: {r.text[:200]}")
 
+    def create_post(self, title: str, content_html: str, status: str = "draft", excerpt: str = "") -> dict:
+        """Create a blog post. status 'draft' keeps it private until published in WP."""
+        payload = {"title": title, "content": content_html, "status": status}
+        if excerpt:
+            payload["excerpt"] = excerpt
+        with self._client() as c:
+            r = c.post(f"{self.base}/wp-json/wp/v2/posts", json=payload)
+        if r.status_code not in (200, 201):
+            raise WordPressError(f"HTTP {r.status_code}: {r.text[:200]}")
+        data = r.json() or {}
+        return {"id": data.get("id"), "link": data.get("link", ""), "status": data.get("status", status)}
+
     @staticmethod
     def _normalize(kind: str, item: dict) -> dict:
         title = ((item.get("title") or {}).get("rendered") or "").strip()

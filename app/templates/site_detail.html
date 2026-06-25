@@ -7,6 +7,9 @@
   {% if tab == 'fixes' and latest_fix_run and latest_fix_run.status == 'running' %}
   <meta http-equiv="refresh" content="6">
   {% endif %}
+  {% if tab == 'content' and latest_draft_run and latest_draft_run.status == 'running' %}
+  <meta http-equiv="refresh" content="6">
+  {% endif %}
 {% endblock %}
 {% block body %}
 <div class="container">
@@ -117,7 +120,44 @@
       </div>
     {% endif %}
   {% elif tab == 'content' %}
-    <div class="empty">No content yet. The content agent arrives in Stage 4.</div>
+    {% set running = latest_draft_run and latest_draft_run.status == 'running' %}
+    <form method="post" action="/sites/{{ site.id }}/draft-content" style="margin-bottom:16px;">
+      <div class="field">
+        <label for="topic">Topic <span class="muted">(optional — leave blank and the agent picks one)</span></label>
+        <input type="text" id="topic" name="topic" placeholder="e.g. Choosing the right outdoor kitchen layout">
+      </div>
+      <button class="btn" type="submit" {{ 'disabled' if running else '' }}>
+        {{ 'Drafting…' if running else 'Draft a blog post' }}
+      </button>
+    </form>
+
+    {% if running %}
+      <div class="empty">Writing a draft — this page refreshes automatically.</div>
+    {% elif latest_draft_run and latest_draft_run.status == 'failed' %}
+      <div class="card"><div class="error">{{ latest_draft_run.summary }}</div></div>
+    {% elif latest_draft_run %}
+      <div class="card"><p style="margin:0;">{{ latest_draft_run.summary }}
+        <a href="/approvals">Review in Approvals →</a></p></div>
+    {% endif %}
+
+    {% if drafts %}
+      <div class="card" style="padding:0; margin-top:16px;">
+        <table>
+          <thead><tr><th>Status</th><th>Title</th><th>Drafted</th></tr></thead>
+          <tbody>
+            {% for d in drafts %}
+            <tr>
+              <td>{{ d.status.replace('_', ' ') }}</td>
+              <td>{{ d.title }}</td>
+              <td class="muted">{{ d.created_at.strftime('%Y-%m-%d %H:%M') if d.created_at else '' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty" style="margin-top:8px;">No content drafted yet. The agent writes a draft; you approve it before anything reaches WordPress.</div>
+    {% endif %}
   {% elif tab == 'settings' %}
     {% if notice == 'saved' %}<div class="card"><p style="margin:0; color:#4f8cff;">Connection saved.</p></div>{% endif %}
     {% if notice == 'test_ok' %}<div class="card"><p style="margin:0; color:#4ade80;">✓ Connection works — the app can reach WordPress.</p></div>{% endif %}

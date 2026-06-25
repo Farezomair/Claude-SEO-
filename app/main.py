@@ -4,7 +4,9 @@ A web app with a single-owner login, a Websites list, an Add-website button,
 and a Postgres-backed workspace per site. No agents yet — this stage exists to
 prove we can build, deploy, and store isolated per-site data.
 """
+import json
 import os
+from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -14,13 +16,18 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from .auth import check_credentials, current_user
 from .connections import get_connection
+from .content_agent import start_draft_async
 from .crypto import encrypt
 from .database import Base, engine, get_db
 from .jobs import start_audit_async
 from .migrations import ensure_columns
-from .models import Audit, AuditIssue, Fix, JobRun, Site, SiteConnection
+from .models import Approval, Audit, AuditIssue, Content, Fix, JobRun, RunLog, Site, SiteConnection
 from .seo_technical import start_metafix_async
-from .wordpress import WordPressClient
+from .wordpress import WordPressClient, WordPressError
+
+# Whether approved content is sent to WordPress as a draft (safe — needs a final
+# Publish click in WP) or published live. Defaults to draft.
+CONTENT_PUBLISH_STATUS = os.getenv("CONTENT_PUBLISH_STATUS", "draft")
 
 # Create tables on startup, then add any columns missing from existing tables.
 Base.metadata.create_all(bind=engine)
@@ -92,8 +99,11 @@ def list_sites(request: Request, db: Session = Depends(get_db)):
     if not current_user(request):
         return RedirectResponse("/login", status_code=303)
     sites = db.query(Site).order_by(Site.created_at.desc()).all()
+    pending_count = db.query(Approval).filter(Approval.status == "pending").count()
     return templates.TemplateResponse(
-        "sites.html", {"request": request, "sites": sites, "user": current_user(request)}
+        "sites.html",
+        {"request": request, "sites": sites, "user": current_user(request),
+         "pending_count": pending_count},
     )
 
 
@@ -142,6 +152,9 @@ def site_detail(
         "fixes": [],
         "connection": None,
         "connection_active": False,
+        "latest_draft_run": None,
+        "drafts": [],
+        "pending_count": db.query(Approval).filter(Approval.status == "pending").count(),
     }
 
     if tab == "audit":
@@ -168,6 +181,17 @@ def site_detail(
         )
         ctx["connection_active"] = get_connection(site_id, site.url, site.name) is not None
 
+    elif tab == "content":
+        ctx["latest_draft_run"] = (
+            db.query(JobRun)
+            .filter(JobRun.site_id == site_id, JobRun.kind == "content_draft")
+            .order_by(JobRun.created_at.desc()).first()
+        )
+        ctx["drafts"] = (
+            db.query(Content).filter(Content.site_id == site_id)
+            .order_by(Content.created_at.desc()).limit(30).all()
+        )
+
     elif tab == "settings":
         ctx["connection"] = (
             db.query(SiteConnection).filter(SiteConnection.site_id == site_id).first()
@@ -175,6 +199,122 @@ def site_detail(
         ctx["connection_active"] = get_connection(site_id, site.url, site.name) is not None
 
     return templates.TemplateResponse("site_detail.html", ctx)
+
+
+@app.post("/sites/{site_id}/draft-content")
+def draft_content(
+    site_id: int,
+    request: Request,
+    topic: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+
+    already_running = (
+        db.query(JobRun)
+        .filter(JobRun.site_id == site_id, JobRun.kind == "content_draft", JobRun.status == "running")
+        .first()
+    )
+    if not already_running:
+        run = JobRun(site_id=site_id, kind="content_draft", status="running", summary="Drafting…")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        start_draft_async(site_id, run.id, topic.strip())
+
+    return RedirectResponse(f"/sites/{site_id}?tab=content", status_code=303)
+
+
+# --------------------------------------------------------------------------
+# Approvals (the safety gate)
+# --------------------------------------------------------------------------
+@app.get("/approvals", response_class=HTMLResponse)
+def approvals(request: Request, notice: str = "", db: Session = Depends(get_db)):
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    pending = (
+        db.query(Approval, Site)
+        .join(Site, Approval.site_id == Site.id)
+        .filter(Approval.status == "pending")
+        .order_by(Approval.created_at.desc())
+        .all()
+    )
+    items = []
+    for appr, site in pending:
+        body = ""
+        if appr.kind == "content":
+            try:
+                cid = json.loads(appr.payload or "{}").get("content_id")
+                content = db.get(Content, cid) if cid else None
+                body = content.body if content else ""
+            except Exception:
+                body = ""
+        items.append({"approval": appr, "site": site, "body": body})
+    return templates.TemplateResponse(
+        "approvals.html",
+        {"request": request, "user": current_user(request), "items": items, "notice": notice,
+         "pending_count": len(items), "publish_status": CONTENT_PUBLISH_STATUS},
+    )
+
+
+@app.post("/approvals/{approval_id}/approve")
+def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    appr = db.get(Approval, approval_id)
+    if not appr or appr.status != "pending":
+        return RedirectResponse("/approvals", status_code=303)
+
+    site = db.get(Site, appr.site_id)
+    if appr.kind == "content":
+        payload = json.loads(appr.payload or "{}")
+        content = db.get(Content, payload.get("content_id"))
+        conn = get_connection(site.id, site.url, site.name)
+        if not conn:
+            return RedirectResponse("/approvals?notice=no_connection", status_code=303)
+        try:
+            wp = WordPressClient(conn["url"], conn["username"], conn["app_password"])
+            result = wp.create_post(
+                content.title, content.body, status=CONTENT_PUBLISH_STATUS, excerpt=appr.summary
+            )
+        except WordPressError as exc:
+            db.add(RunLog(site_id=site.id, message=f"Publish failed for “{appr.title}”: {exc}"))
+            db.commit()
+            return RedirectResponse("/approvals?notice=publish_fail", status_code=303)
+        content.status = "published" if CONTENT_PUBLISH_STATUS == "publish" else "in_wordpress_draft"
+        db.add(RunLog(
+            site_id=site.id,
+            message=f"Approved & sent to WordPress ({result.get('status')}): {content.title} {result.get('link', '')}",
+        ))
+
+    appr.status = "approved"
+    appr.decided_at = datetime.now(timezone.utc)
+    db.commit()
+    return RedirectResponse("/approvals?notice=approved", status_code=303)
+
+
+@app.post("/approvals/{approval_id}/reject")
+def reject(approval_id: int, request: Request, db: Session = Depends(get_db)):
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    appr = db.get(Approval, approval_id)
+    if not appr or appr.status != "pending":
+        return RedirectResponse("/approvals", status_code=303)
+    if appr.kind == "content":
+        try:
+            content = db.get(Content, json.loads(appr.payload or "{}").get("content_id"))
+            if content:
+                content.status = "rejected"
+        except Exception:
+            pass
+    appr.status = "rejected"
+    appr.decided_at = datetime.now(timezone.utc)
+    db.commit()
+    return RedirectResponse("/approvals?notice=rejected", status_code=303)
 
 
 @app.post("/sites/{site_id}/connection")

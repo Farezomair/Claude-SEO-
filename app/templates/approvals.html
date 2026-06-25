@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Approvals &middot; SEO Agent System{% endblock %}
+{% block body %}
+<div class="container">
+  <h1>Approvals</h1>
+  <p class="muted" style="margin-top:0;">
+    Changes waiting for your yes or no. Approving content sends it to WordPress
+    {% if publish_status == 'publish' %}<strong>and publishes it live</strong>{% else %}as a <strong>draft</strong> (you give it a final look and hit Publish in WordPress){% endif %}.
+  </p>
+
+  {% if notice == 'approved' %}<div class="card"><p style="margin:0; color:#4ade80;">Approved and sent to WordPress.</p></div>{% endif %}
+  {% if notice == 'rejected' %}<div class="card"><p style="margin:0;" class="muted">Rejected and discarded.</p></div>{% endif %}
+  {% if notice == 'no_connection' %}<div class="card"><div class="error">Can't publish — that site has no WordPress connection. Set it up in the site's Settings tab.</div></div>{% endif %}
+  {% if notice == 'publish_fail' %}<div class="card"><div class="error">Approved, but sending to WordPress failed. Check the connection and try again.</div></div>{% endif %}
+
+  {% if items %}
+    {% for item in items %}
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:baseline;">
+        <h2 style="margin-bottom:4px;">{{ item.approval.title }}</h2>
+        <span class="muted">{{ item.site.name }}</span>
+      </div>
+      <p class="muted" style="margin-top:0;">{{ item.approval.kind }} &middot;
+        {{ item.approval.created_at.strftime('%Y-%m-%d %H:%M UTC') if item.approval.created_at else '' }}</p>
+      {% if item.approval.summary %}<p>{{ item.approval.summary }}</p>{% endif %}
+      {% if item.body %}
+        <details>
+          <summary style="cursor:pointer; color:var(--accent);">Preview content</summary>
+          <div style="border:1px solid var(--border); border-radius:8px; padding:16px; margin-top:12px; max-height:360px; overflow:auto; background:#fff; color:#111;">
+            {{ item.body | safe }}
+          </div>
+        </details>
+      {% endif %}
+      <div style="display:flex; gap:8px; margin-top:16px;">
+        <form method="post" action="/approvals/{{ item.approval.id }}/approve">
+          <button class="btn" type="submit">Approve</button>
+        </form>
+        <form method="post" action="/approvals/{{ item.approval.id }}/reject">
+          <button class="btn secondary" type="submit">Reject</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="empty">Nothing waiting for approval. 🎉</div>
+  {% endif %}
+</div>
+{% endblock %}
