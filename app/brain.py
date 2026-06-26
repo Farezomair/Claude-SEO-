@@ -39,9 +39,15 @@ def _extract_json(text: str) -> dict:
         raise
 
 
-def generate_meta(page_title: str, page_url: str, content_excerpt: str, site_name: str = "") -> dict:
+def _rules_block(rules: str) -> str:
+    rules = (rules or "").strip()
+    return f"\n\nHouse rules you MUST follow:\n{rules}\n" if rules else ""
+
+
+def generate_meta(page_title: str, page_url: str, content_excerpt: str,
+                  site_name: str = "", rules: str = "") -> dict:
     """Return {"title": str, "description": str} for a page."""
-    prompt = f"""You are an expert SEO copywriter. Write an SEO meta title and meta description for this web page.
+    prompt = f"""You are an expert SEO copywriter. Write an SEO meta title and meta description for this web page.{_rules_block(rules)}
 
 Site name: {site_name or "(unknown)"}
 Page URL: {page_url}
@@ -74,12 +80,12 @@ Respond with ONLY a JSON object, no preamble and no markdown, in exactly this sh
     return {"title": title, "description": description}
 
 
-def generate_article(site_name: str, site_url: str, topic: str = "") -> dict:
+def generate_article(site_name: str, site_url: str, topic: str = "", rules: str = "") -> dict:
     """Draft a blog post. Returns {"title", "meta_description", "body_html"}."""
     topic_line = f"Write about this topic: {topic}" if topic.strip() else \
         "Choose a useful, search-worthy topic that fits this business and its likely customers."
 
-    prompt = f"""You are an expert SEO content writer creating a blog post for a business website.
+    prompt = f"""You are an expert SEO content writer creating a blog post for a business website.{_rules_block(rules)}
 
 Business: {site_name}
 Website: {site_url}

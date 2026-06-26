@@ -119,6 +119,12 @@ def crawl_site(start_url: str) -> dict:
             if not _has_footer(soup):
                 issues.append(_issue("structure", "medium", page_url, "No footer region found on page"))
 
+            # --- indexation check (SEO backend) ---
+            robots_meta = soup.find("meta", attrs={"name": re.compile(r"^robots$", re.I)})
+            if robots_meta and "noindex" in (robots_meta.get("content", "") or "").lower():
+                issues.append(_issue("indexation", "medium", page_url,
+                                     "Page is set to noindex — it won't appear in Google"))
+
             # --- link discovery + checks ---
             for anchor in soup.find_all("a", href=True):
                 href = anchor["href"].strip()
@@ -166,6 +172,28 @@ def crawl_site(start_url: str) -> dict:
                             sev = "high" if internal else "medium"
                             issues.append(_issue("broken_link", sev, page_url,
                                                  f"Link returns HTTP {status}: {link}"))
+
+        # --- site-wide SEO backend checks (robots.txt + sitemap) ---
+        origin = f"{urlparse(start_url).scheme}://{urlparse(start_url).netloc}"
+        try:
+            rr = client.get(origin + "/robots.txt")
+            if rr.status_code >= 400:
+                issues.append(_issue("indexation", "low", origin, "No robots.txt found"))
+        except Exception:
+            pass
+
+        sitemap_found = False
+        for path in ("/sitemap.xml", "/sitemap_index.xml", "/wp-sitemap.xml"):
+            try:
+                sr = client.get(origin + path)
+                if sr.status_code == 200 and "<" in sr.text[:200]:
+                    sitemap_found = True
+                    break
+            except Exception:
+                pass
+        if not sitemap_found:
+            issues.append(_issue("indexation", "medium", origin,
+                                 "No sitemap.xml found — search engines may miss pages"))
 
     stats = {
         "pages_crawled": pages_crawled,

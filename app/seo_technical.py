@@ -17,6 +17,7 @@ import threading
 from .brain import generate_meta
 from .database import SessionLocal
 from .models import Fix, JobRun, RunLog
+from .rules import rules_for
 from .wordpress import YOAST_DESC_KEY, YOAST_TITLE_KEY, WordPressClient, WordPressError
 
 # Hard caps / thresholds (guardrails).
@@ -64,6 +65,7 @@ def run_metafix(site_id: int, run_id: int, conn: dict) -> None:
             db.commit()
             return
 
+        rules = rules_for("shared", "seo_technical")
         items = wp.list_content(limit=60)
         for item in items:
             if fixes_made >= MAX_FIXES:
@@ -76,7 +78,8 @@ def run_metafix(site_id: int, run_id: int, conn: dict) -> None:
             # One generation per page covers both title and description.
             try:
                 suggestion = generate_meta(
-                    item["title"], item["link"], item["content_text"], conn.get("site_name", "")
+                    item["title"], item["link"], item["content_text"],
+                    conn.get("site_name", ""), rules=rules,
                 )
             except Exception as exc:
                 db.add(RunLog(site_id=site_id,

@@ -24,6 +24,8 @@ from .migrations import ensure_columns
 from .models import (
     Approval, Audit, AuditIssue, Content, Fix, JobRun, Report, RunLog, Site, SiteConnection, utcnow,
 )
+from .rules import SCOPES as RULE_SCOPES
+from .rules import get_rules, set_rules
 from .scheduler import ENABLED as SCHEDULER_ENABLED
 from .scheduler import INTERVAL_DAYS, is_due, start_scheduler
 from .seo_technical import start_metafix_async
@@ -246,6 +248,29 @@ def run_weekly_now(site_id: int, request: Request, db: Session = Depends(get_db)
         start_weekly_async(site_id, run.id)
 
     return RedirectResponse(f"/sites/{site_id}?tab=reports", status_code=303)
+
+
+@app.get("/rules", response_class=HTMLResponse)
+def rules_page(request: Request, notice: str = "", db: Session = Depends(get_db)):
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    rules = [{"scope": s, "label": label, "content": get_rules(s)} for s, label in RULE_SCOPES]
+    pending_count = db.query(Approval).filter(Approval.status == "pending").count()
+    return templates.TemplateResponse(
+        "rules.html",
+        {"request": request, "user": current_user(request), "rules": rules,
+         "notice": notice, "pending_count": pending_count},
+    )
+
+
+@app.post("/rules")
+async def save_rules(request: Request):
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    form = await request.form()
+    for scope, _label in RULE_SCOPES:
+        set_rules(scope, (form.get(scope) or "").strip())
+    return RedirectResponse("/rules?notice=saved", status_code=303)
 
 
 @app.post("/sites/{site_id}/draft-content")

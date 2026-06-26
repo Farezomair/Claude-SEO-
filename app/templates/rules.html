@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Rules &middot; SEO Agent System{% endblock %}
+{% block body %}
+<div class="container">
+  <h1>Agent rules</h1>
+  <p class="muted" style="margin-top:0;">
+    The dos and don'ts the agents follow on every run. Plain English, one rule
+    per line. Shared rules apply to every agent; the others layer on top.
+  </p>
+  {% if notice == 'saved' %}<div class="card"><p style="margin:0; color:#4ade80;">Rules saved.</p></div>{% endif %}
+
+  <form method="post" action="/rules">
+    {% for r in rules %}
+    <div class="card">
+      <label for="{{ r.scope }}" style="font-size:15px; color:var(--text);">{{ r.label }}</label>
+      <textarea id="{{ r.scope }}" name="{{ r.scope }}" rows="6"
+        style="width:100%; margin-top:10px; padding:12px; border-radius:8px; border:1px solid var(--border); background:var(--panel-2); color:var(--text); font-size:14px; font-family:inherit;"
+        placeholder="e.g. Always mention the city. Never promise specific prices. Friendly, confident tone.">{{ r.content }}</textarea>
+    </div>
+    {% endfor %}
+    <button class="btn" type="submit">Save rules</button>
+  </form>
+</div>
+{% endblock %}

@@ -10,6 +10,7 @@ import threading
 from .brain import generate_article
 from .database import SessionLocal
 from .models import Approval, Content, JobRun, RunLog, Site
+from .rules import rules_for
 
 
 def run_draft(site_id: int, run_id: int, topic: str = "") -> None:
@@ -18,7 +19,7 @@ def run_draft(site_id: int, run_id: int, topic: str = "") -> None:
         run = db.get(JobRun, run_id)
         site = db.get(Site, site_id)
         try:
-            article = generate_article(site.name, site.url, topic)
+            article = generate_article(site.name, site.url, topic, rules=rules_for("shared", "content"))
         except Exception as exc:
             run.status = "failed"
             run.summary = f"Draft failed: {exc.__class__.__name__}: {exc}"

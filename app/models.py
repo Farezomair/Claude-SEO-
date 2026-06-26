@@ -140,6 +140,22 @@ class Report(Base):
     created_at = Column(DateTime, default=utcnow)
 
 
+class Rulebook(Base):
+    """Editable agent rules (Stage 6).
+
+    The dos and don'ts the agents follow, stored as configuration rather than
+    hardcoded so they can be tuned without a rebuild. One row per scope:
+    'shared' applies to every agent; agent-specific scopes layer on top.
+    """
+
+    __tablename__ = "rulebooks"
+
+    id = Column(Integer, primary_key=True)
+    scope = Column(String(50), unique=True, nullable=False)  # shared / seo_technical / content
+    content = Column(Text, default="")
+    updated_at = Column(DateTime, default=utcnow)
+
+
 class Content(Base):
     """Drafted or published content for a site (filled from Stage 4)."""
 
