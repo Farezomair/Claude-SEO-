@@ -16,7 +16,8 @@ import threading
 
 from .brain import generate_meta
 from .database import SessionLocal
-from .models import Fix, JobRun, RunLog
+from .models import Finding, FixRecord, JobRun, RunLog
+from .routing import classify
 from .rules import rules_for
 from .wordpress import YOAST_DESC_KEY, YOAST_TITLE_KEY, WordPressClient, WordPressError
 
@@ -98,34 +99,55 @@ def run_metafix(site_id: int, run_id: int, conn: dict) -> None:
                     continue
                 old_val = (item["meta"].get(key) or "").strip()
 
+                # Record the routed Finding (in Phase B this comes from the SEO
+                # Auditor; for now the SEO Technical doer detects + fixes it).
+                cls = classify(field)
+                finding = Finding(
+                    site_id=site_id, finding_key=f"SA-{site_id}-{run_id}-{fixes_made + 1}",
+                    mode="audit", group=cls["group"], category=field,
+                    issue=f"{field.replace('_', ' ')} {reason} on {item['link']}",
+                    severity="medium", route=cls["route"], action_class=cls["action_class"],
+                    evidence_url=item["link"], detection_source="crawl", status="open",
+                )
+                db.add(finding)
+                db.commit()
+                db.refresh(finding)
+
+                fix_key = f"FX-{site_id}-{run_id}-{fixes_made + 1}"
                 # Verify-before-write reversibility: capture old, then write.
                 try:
                     wp.update_meta(item["kind"], item["id"], {key: new_val})
                 except WordPressError as exc:
-                    db.add(Fix(
-                        site_id=site_id, title=f"{field.replace('_', ' ')} — {item['title'] or item['link']}",
-                        status="failed", field=field, page_ref=item["link"],
-                        old_value=old_val, new_value=new_val,
-                        detail=f"{reason}. Write failed: {exc}",
+                    db.add(FixRecord(
+                        site_id=site_id, finding_id=finding.id, fix_key=fix_key,
+                        doer="SEO Technical", action_taken=f"Write {field} failed: {exc}",
+                        page_ref=item["link"], field=field, before_value=old_val,
+                        after_value=new_val, method="auto-safe", lane="autonomous",
+                        applied=False, status="handed-off",
                     ))
+                    finding.status = "escalated"
                     db.commit()
                     continue
 
-                # QC re-check: confirm the change is actually live.
+                # Verification (QC): confirm the change is live.
                 try:
                     live = wp.get_meta(item["kind"], item["id"])
                     verified = (live.get(key) or "").strip() == new_val.strip()
                 except WordPressError:
                     verified = False
 
-                db.add(Fix(
-                    site_id=site_id,
-                    title=f"Updated {field.replace('_', ' ')} — {item['title'] or item['link']}",
-                    status="verified" if verified else "applied",
-                    field=field, page_ref=item["link"],
-                    old_value=old_val, new_value=new_val,
-                    detail=f"{reason}. QC: {'passed' if verified else 'could not confirm'}.",
+                db.add(FixRecord(
+                    site_id=site_id, finding_id=finding.id, fix_key=fix_key,
+                    doer="SEO Technical",
+                    action_taken=f"Set {field.replace('_', ' ')} to: {new_val}",
+                    page_ref=item["link"], field=field,
+                    before_value=old_val, after_value=new_val,
+                    method="auto-safe", lane="autonomous", applied=True,
+                    verification_verdict="verified" if verified else "not_fixed",
+                    verify_hint=f"Confirm {field} on page equals the new value",
+                    status="done",
                 ))
+                finding.status = "closed" if verified else "reopened"
                 db.commit()
                 fixes_made += 1
 

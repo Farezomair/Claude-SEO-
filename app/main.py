@@ -23,7 +23,7 @@ from .database import Base, engine, get_db
 from .jobs import start_audit_async
 from .migrations import ensure_columns
 from .models import (
-    Approval, Audit, AuditIssue, Content, Fix, JobRun, Report, RunLog, Site,
+    Approval, Audit, Content, Finding, FixRecord, JobRun, Report, RunLog, Site,
     SiteChange, SiteConnection, utcnow,
 )
 from .rules import SCOPES as RULE_SCOPES
@@ -66,6 +66,15 @@ _BADGE_CLASS = {
     "drafting": "warning", "in wordpress draft": "info", "draft": "neutral",
     "failed": "danger", "rejected": "danger", "reverted": "neutral",
     "high": "danger", "medium": "warning", "low": "info",
+    # Finding / verification statuses
+    "blocker": "danger", "critical": "danger",
+    "open": "warning", "reopened": "warning", "escalated": "danger", "closed": "success",
+    "verified": "success", "not fixed": "danger", "partial": "warning",
+    "regressed": "danger", "handed off": "neutral", "needs human input": "warning",
+    # action classes
+    "auto-safe": "success", "auto safe": "success",
+    "needs-approval": "warning", "needs approval": "warning",
+    "needs-human": "info", "needs human": "info",
 }
 
 
@@ -179,9 +188,9 @@ def site_detail(
         "user": current_user(request),
         "notice": notice,
         "latest_audit": None,
-        "issues": [],
+        "findings": [],
         "latest_fix_run": None,
-        "fixes": [],
+        "fix_records": [],
         "connection": None,
         "connection_active": False,
         "latest_draft_run": None,
@@ -203,10 +212,10 @@ def site_detail(
         )
         ctx["latest_audit"] = latest_audit
         if latest_audit and latest_audit.status == "completed":
-            severity_rank = {"high": 0, "medium": 1, "low": 2}
-            issues = db.query(AuditIssue).filter(AuditIssue.audit_id == latest_audit.id).all()
-            issues.sort(key=lambda i: (severity_rank.get(i.severity, 3), i.category))
-            ctx["issues"] = issues
+            severity_rank = {"blocker": 0, "critical": 1, "high": 2, "medium": 3, "low": 4}
+            findings = db.query(Finding).filter(Finding.audit_id == latest_audit.id).all()
+            findings.sort(key=lambda f: (severity_rank.get(f.severity, 5), f.category))
+            ctx["findings"] = findings
 
     elif tab == "fixes":
         ctx["latest_fix_run"] = (
@@ -214,9 +223,9 @@ def site_detail(
             .filter(JobRun.site_id == site_id, JobRun.kind == "metafix")
             .order_by(JobRun.created_at.desc()).first()
         )
-        ctx["fixes"] = (
-            db.query(Fix).filter(Fix.site_id == site_id)
-            .order_by(Fix.created_at.desc()).limit(50).all()
+        ctx["fix_records"] = (
+            db.query(FixRecord).filter(FixRecord.site_id == site_id)
+            .order_by(FixRecord.created_at.desc()).limit(50).all()
         )
         ctx["connection_active"] = get_connection(site_id, site.url, site.name) is not None
 

@@ -57,17 +57,19 @@
       <div class="card"><div class="error">{{ latest_audit.summary }}</div></div>
     {% elif latest_audit and latest_audit.status == 'completed' %}
       <div class="card"><p style="margin:0;">{{ latest_audit.summary }}</p></div>
-      {% if issues %}
+      {% if findings %}
         <div class="card" style="padding:0;">
           <table>
-            <thead><tr><th>Severity</th><th>Type</th><th>Detail</th><th>Page</th></tr></thead>
+            <thead><tr><th>Severity</th><th>Finding</th><th>Owner</th><th>Action</th><th>Status</th><th>Page</th></tr></thead>
             <tbody>
-              {% for issue in issues %}
+              {% for f in findings %}
               <tr>
-                <td>{{ issue.severity | badge }}</td>
-                <td>{{ issue.category.replace('_', ' ') }}</td>
-                <td>{{ issue.detail }}</td>
-                <td class="muted">{{ issue.url }}</td>
+                <td>{{ f.severity | badge }}</td>
+                <td>{{ f.issue }}</td>
+                <td>{{ f.route }}</td>
+                <td>{{ f.action_class | badge }}</td>
+                <td>{{ f.status | badge }}</td>
+                <td class="muted">{{ f.evidence_url }}</td>
               </tr>
               {% endfor %}
             </tbody>
@@ -110,17 +112,19 @@
       <div class="empty">Click <strong>Run meta fixes</strong> to write SEO-improved titles and descriptions to pages that need them. Each change is verified before it's marked done.</div>
     {% endif %}
 
-    {% if fixes %}
+    {% if fix_records %}
       <div class="card" style="padding:0; margin-top:16px;">
         <table>
-          <thead><tr><th>Status</th><th>Field</th><th>New value</th><th>Page</th></tr></thead>
+          <thead><tr><th>Verdict</th><th>Doer</th><th>Field</th><th>New value</th><th>Method</th><th>Page</th></tr></thead>
           <tbody>
-            {% for fix in fixes %}
+            {% for fx in fix_records %}
             <tr>
-              <td>{{ fix.status | badge }}</td>
-              <td>{{ fix.field.replace('_', ' ') if fix.field else '' }}</td>
-              <td>{{ fix.new_value }}</td>
-              <td class="muted">{{ fix.page_ref }}</td>
+              <td>{{ (fx.verification_verdict or fx.status) | badge }}</td>
+              <td>{{ fx.doer }}</td>
+              <td>{{ fx.field.replace('_', ' ') if fx.field else '' }}</td>
+              <td>{{ fx.after_value }}</td>
+              <td>{{ fx.method | badge }}</td>
+              <td class="muted">{{ fx.page_ref }}</td>
             </tr>
             {% endfor %}
           </tbody>

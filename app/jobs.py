@@ -9,7 +9,8 @@ import threading
 
 from .crawler import crawl_site
 from .database import SessionLocal
-from .models import Audit, AuditIssue, RunLog
+from .models import Audit, Finding, RunLog
+from .routing import classify
 
 
 def _run_audit(site_id: int, audit_id: int, start_url: str) -> None:
@@ -27,11 +28,16 @@ def _run_audit(site_id: int, audit_id: int, start_url: str) -> None:
             db.commit()
             return
 
-        for iss in result["issues"]:
-            db.add(AuditIssue(
+        # The Website Auditor produces structured, routed Findings.
+        for seq, iss in enumerate(result["issues"], start=1):
+            cls = classify(iss["category"])
+            db.add(Finding(
                 site_id=site_id, audit_id=audit_id,
-                category=iss["category"], severity=iss["severity"],
-                url=iss["url"], detail=iss["detail"],
+                finding_key=f"WA-{site_id}-{audit_id}-{seq}",
+                mode="audit", group=cls["group"], category=iss["category"],
+                issue=iss["detail"], severity=iss["severity"],
+                route=cls["route"], action_class=cls["action_class"],
+                evidence_url=iss["url"], detection_source="crawl", status="open",
             ))
         s = result["stats"]
         audit.status = "completed"

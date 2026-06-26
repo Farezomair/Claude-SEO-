@@ -11,7 +11,7 @@ the Audit / Fixes / Content tabs, which is how we prove isolation works.
 """
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -174,6 +174,57 @@ class Rulebook(Base):
     scope = Column(String(50), unique=True, nullable=False)  # shared / seo_technical / content
     content = Column(Text, default="")
     updated_at = Column(DateTime, default=utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Phase A — the structured architecture spine.
+# A Finding is a routed, classified problem produced by an auditor. A FixRecord
+# is what a doer did about it, with a rollback snapshot and a verification
+# verdict. Every agent in the blueprint plugs into these two tables.
+# ---------------------------------------------------------------------------
+class Finding(Base):
+    __tablename__ = "findings"
+
+    id = Column(Integer, primary_key=True)
+    site_id = Column(Integer, ForeignKey("sites.id", ondelete="CASCADE"), nullable=False)
+    audit_id = Column(Integer, ForeignKey("audits.id", ondelete="CASCADE"), nullable=True)
+    finding_key = Column(String(80), default="")     # e.g. WA-{site}-{run}-{seq}
+    mode = Column(String(20), default="audit")       # audit / verification
+    group = Column(String(50), default="")           # site-integrity, indexation, meta, structure
+    category = Column(String(50), default="")        # broken_link, meta_title, ...
+    issue = Column(Text, default="")                 # human description
+    severity = Column(String(20), default="medium")  # blocker/critical/high/medium/low
+    halt = Column(Boolean, default=False)
+    finding_type = Column(String(20), default="defect")  # defect / opportunity
+    route = Column(String(50), default="")           # owning doer
+    action_class = Column(String(30), default="needs-approval")  # auto-safe/needs-approval/needs-human
+    evidence_url = Column(String(1000), default="")
+    detection_source = Column(String(50), default="crawl")
+    status = Column(String(20), default="open")      # open/closed/reopened/escalated
+    created_at = Column(DateTime, default=utcnow)
+
+
+class FixRecord(Base):
+    __tablename__ = "fix_records"
+
+    id = Column(Integer, primary_key=True)
+    site_id = Column(Integer, ForeignKey("sites.id", ondelete="CASCADE"), nullable=False)
+    finding_id = Column(Integer, ForeignKey("findings.id", ondelete="CASCADE"), nullable=True)
+    fix_key = Column(String(80), default="")
+    doer = Column(String(50), default="")
+    action_taken = Column(Text, default="")
+    page_ref = Column(String(1000), default="")
+    field = Column(String(100), default="")
+    before_value = Column(Text, default="")          # snapshot for rollback
+    after_value = Column(Text, default="")
+    method = Column(String(30), default="")          # auto-safe/gate-approved/autonomous/...
+    lane = Column(String(20), default="")            # autonomous/gated/hard-stop
+    applied = Column(Boolean, default=False)
+    verification_verdict = Column(String(20), default="")  # verified/not_fixed/partial/regressed
+    verify_hint = Column(Text, default="")
+    outcome_pending = Column(Boolean, default=False)
+    status = Column(String(20), default="done")      # done/handed-off/needs-human-input
+    created_at = Column(DateTime, default=utcnow)
 
 
 class Content(Base):
