@@ -1,14 +1,17 @@
-"""Read-only website auditor (Stage 2).
+"""Read-only website auditor (Phase B — expanded battery).
 
-Crawls a site starting from its homepage and reports problems. It NEVER writes
-anything to the target site — only HTTP GET/HEAD requests. Guardrails from the
-master plan are enforced here as hard, code-level caps so a crawl can never run
-away: a max page count, a max number of link checks, and a per-request timeout.
+Crawls a site from its homepage and reports problems. NEVER writes to the target
+site (only HTTP GET/HEAD). Hard caps: max pages, max link checks, per-request
+timeout.
 
-Checks performed:
-- broken_page : a crawled page returns HTTP >= 400 or fails to load
-- broken_link : a link (internal or external) returns HTTP >= 400 or is unreachable
-- structure   : a page is missing a <header> or <footer> region
+Checks (all crawl-based, no external API):
+- site integrity : broken pages, broken links, redirect issues
+- indexation     : robots.txt, sitemap, noindex, missing canonical
+- structure      : missing header/footer region
+- on-page        : missing/duplicate title, missing/multiple H1, missing viewport,
+                   missing favicon, images missing alt
+- required pages : privacy / contact / about / terms / accessibility present
+- security       : HTTPS enforced, mixed content, core security headers
 """
 import re
 from urllib.parse import urljoin, urlparse
@@ -16,26 +19,46 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from bs4 import BeautifulSoup
 
-# Many themes (esp. WordPress page builders) use <div class="...header...">
-# rather than the semantic <header> tag, so we detect header/footer regions by
-# tag OR ARIA role OR a class/id naming convention, to avoid false positives.
 HEADER_RE = re.compile(r"header|masthead|navbar|topbar", re.I)
 FOOTER_RE = re.compile(r"footer|colophon", re.I)
+ICON_RE = re.compile(r"icon", re.I)
 
-# Social "share" widgets are not navigational links and routinely block bots,
-# so checking them produces false "broken link" noise. Skip them.
+# Social share widgets: not navigational links, routinely block bots. Skip.
 SHARE_RE = re.compile(
     r"(twitter\.com|x\.com)/intent|facebook\.com/sharer|"
     r"linkedin\.com/share|pinterest\.com/pin/create|"
     r"reddit\.com/submit|api\.whatsapp\.com|wa\.me",
     re.I,
 )
+# Domains that block automated checkers, so a 4xx from them is not a broken link.
+BOT_BLOCK_RE = re.compile(
+    r"yelp\.com|instagram\.com|linkedin\.com|facebook\.com|tiktok\.com|"
+    r"twitter\.com|x\.com|nextdoor\.com|tripadvisor\.com",
+    re.I,
+)
+BOT_BLOCK_CODES = {403, 405, 429, 999}
 
-# --- Hard caps (guardrails) ------------------------------------------------
-MAX_PAGES = 30          # most pages we will crawl in one run
-MAX_LINK_CHECKS = 150   # most distinct links we will status-check in one run
+MIXED_CONTENT_RE = re.compile(r"<(?:img|script|iframe|link|source)\b[^>]+(?:src|href)=[\"']http://", re.I)
+
+# Required pages: category -> keywords that appear in the page path
+REQUIRED_PAGES = {
+    "privacy": (["privacy"], "medium"),
+    "contact": (["contact"], "medium"),
+    "about": (["about"], "low"),
+    "terms": (["terms", "tos"], "low"),
+    "accessibility": (["accessibility"], "low"),
+}
+SECURITY_HEADERS = {
+    "strict-transport-security": "HSTS",
+    "content-security-policy": "Content-Security-Policy",
+    "x-frame-options": "X-Frame-Options",
+    "x-content-type-options": "X-Content-Type-Options",
+}
+
+MAX_PAGES = 30
+MAX_LINK_CHECKS = 150
 MAX_QUEUE = MAX_PAGES * 4
-REQUEST_TIMEOUT = 8.0   # seconds per request
+REQUEST_TIMEOUT = 8.0
 USER_AGENT = "SEO-Agent-Auditor/1.0 (+read-only audit)"
 
 
@@ -44,7 +67,6 @@ def _issue(category: str, severity: str, url: str, detail: str) -> dict:
 
 
 def _normalize(url: str) -> str:
-    """Drop the fragment so #anchors don't create duplicate URLs."""
     return urlparse(url)._replace(fragment="").geturl()
 
 
@@ -56,38 +78,39 @@ def _same_domain(a: str, b: str) -> bool:
     return _domain(a) == _domain(b)
 
 
-def _has_header(soup: BeautifulSoup) -> bool:
-    return bool(
-        soup.find("header")
-        or soup.find(attrs={"role": "banner"})
-        or soup.find(class_=HEADER_RE)
-        or soup.find(id=HEADER_RE)
-        or soup.find("nav")
-    )
+def _has_header(soup):
+    return bool(soup.find("header") or soup.find(attrs={"role": "banner"})
+               or soup.find(class_=HEADER_RE) or soup.find(id=HEADER_RE) or soup.find("nav"))
 
 
-def _has_footer(soup: BeautifulSoup) -> bool:
-    return bool(
-        soup.find("footer")
-        or soup.find(attrs={"role": "contentinfo"})
-        or soup.find(class_=FOOTER_RE)
-        or soup.find(id=FOOTER_RE)
-    )
+def _has_footer(soup):
+    return bool(soup.find("footer") or soup.find(attrs={"role": "contentinfo"})
+               or soup.find(class_=FOOTER_RE) or soup.find(id=FOOTER_RE))
+
+
+def _page_title(soup) -> str:
+    t = soup.find("title")
+    return (t.get_text() or "").strip() if t else ""
 
 
 def crawl_site(start_url: str) -> dict:
-    """Crawl ``start_url`` read-only and return {"issues": [...], "stats": {...}}."""
+    """Crawl ``start_url`` read-only. Returns {"issues": [...], "stats": {...}}."""
     if not start_url.startswith(("http://", "https://")):
         start_url = "https://" + start_url
 
     issues: list[dict] = []
     visited: set[str] = set()
     queue: list[str] = [_normalize(start_url)]
-    checked_links: dict[str, int | None] = {}   # link -> status code (or None if unreachable)
-    reported_broken: set[str] = set()            # so one bad link isn't reported many times
+    checked_links: dict[str, int | None] = {}
+    reported_broken: set[str] = set()
+    internal_paths: set[str] = set()
+    titles: dict[str, str] = {}            # url -> title (for duplicate detection)
     pages_crawled = 0
     links_checked = 0
+    homepage_html = ""
+    homepage_headers: dict = {}
 
+    origin = f"{urlparse(start_url).scheme}://{urlparse(start_url).netloc}"
     headers = {"User-Agent": USER_AGENT}
     with httpx.Client(follow_redirects=True, timeout=REQUEST_TIMEOUT, headers=headers) as client:
         while queue and pages_crawled < MAX_PAGES:
@@ -111,19 +134,57 @@ def crawl_site(start_url: str) -> dict:
             if "text/html" not in resp.headers.get("content-type", ""):
                 continue
 
-            soup = BeautifulSoup(resp.text, "html.parser")
+            # Redirect issue: a chain longer than one hop, or a temporary (302).
+            if len(resp.history) >= 2:
+                issues.append(_issue("redirect_issue", "low", page_url,
+                                     f"Redirect chain of {len(resp.history)} hops"))
+            elif resp.history and resp.history[0].status_code == 302:
+                issues.append(_issue("redirect_issue", "low", page_url,
+                                     "Temporary (302) redirect that should likely be a permanent 301"))
 
-            # --- structure checks ---
+            soup = BeautifulSoup(resp.text, "html.parser")
+            if not homepage_html:
+                homepage_html, homepage_headers = resp.text, dict(resp.headers)
+
+            # --- structure ---
             if not _has_header(soup):
                 issues.append(_issue("structure", "medium", page_url, "No header region found on page"))
             if not _has_footer(soup):
                 issues.append(_issue("structure", "medium", page_url, "No footer region found on page"))
 
-            # --- indexation check (SEO backend) ---
+            # --- indexation ---
             robots_meta = soup.find("meta", attrs={"name": re.compile(r"^robots$", re.I)})
             if robots_meta and "noindex" in (robots_meta.get("content", "") or "").lower():
                 issues.append(_issue("indexation", "medium", page_url,
                                      "Page is set to noindex — it won't appear in Google"))
+            if not soup.find("link", attrs={"rel": re.compile(r"canonical", re.I)}):
+                issues.append(_issue("missing_canonical", "low", page_url,
+                                     "No canonical tag on page"))
+
+            # --- on-page mechanics ---
+            title = _page_title(soup)
+            if not title:
+                issues.append(_issue("missing_title", "high", page_url, "Page has no <title> tag"))
+            else:
+                titles[page_url] = title
+            h1s = soup.find_all("h1")
+            if len(h1s) == 0:
+                issues.append(_issue("missing_h1", "medium", page_url, "Page has no H1 heading"))
+            elif len(h1s) > 1:
+                issues.append(_issue("multiple_h1", "low", page_url, f"Page has {len(h1s)} H1 headings (should be one)"))
+            if not soup.find("meta", attrs={"name": re.compile(r"^viewport$", re.I)}):
+                issues.append(_issue("missing_viewport", "medium", page_url,
+                                     "No viewport meta — page may not be mobile-friendly"))
+            imgs = soup.find_all("img")
+            no_alt = [i for i in imgs if i.get("alt") is None]
+            if no_alt:
+                issues.append(_issue("images_missing_alt", "low", page_url,
+                                     f"{len(no_alt)} of {len(imgs)} images missing alt text"))
+
+            # --- security: mixed content on HTTPS pages ---
+            if page_url.startswith("https://") and MIXED_CONTENT_RE.search(resp.text):
+                issues.append(_issue("mixed_content", "medium", page_url,
+                                     "Page loads some assets over insecure HTTP (mixed content)"))
 
             # --- link discovery + checks ---
             for anchor in soup.find_all("a", href=True):
@@ -134,23 +195,20 @@ def crawl_site(start_url: str) -> dict:
                 if not link.startswith(("http://", "https://")):
                     continue
                 if SHARE_RE.search(link):
-                    continue  # share widget, not a real link
-
+                    continue
                 internal = _same_domain(link, start_url)
-
-                # queue internal pages for crawling
                 if internal:
+                    internal_paths.add(urlparse(link).path.lower())
                     if (link not in visited and link not in queue
                             and len(visited) + len(queue) < MAX_QUEUE):
                         queue.append(link)
 
-                # status-check the link (capped, deduplicated)
                 if link not in checked_links and links_checked < MAX_LINK_CHECKS:
                     links_checked += 1
                     status = None
                     try:
                         r = client.head(link)
-                        if r.status_code >= 400:  # some servers reject HEAD; confirm with GET
+                        if r.status_code >= 400:
                             r = client.get(link)
                         status = r.status_code
                     except Exception:
@@ -165,23 +223,25 @@ def crawl_site(start_url: str) -> dict:
                                                      f"Internal link could not be reached: {link}"))
                             else:
                                 issues.append(_issue("broken_link", "low", page_url,
-                                                     f"External link could not be verified "
-                                                     f"(may block automated checks): {link}"))
+                                                     f"External link could not be verified: {link}"))
                         elif status >= 400:
                             reported_broken.add(link)
-                            sev = "high" if internal else "medium"
-                            issues.append(_issue("broken_link", sev, page_url,
-                                                 f"Link returns HTTP {status}: {link}"))
+                            # External 4xx from a known bot-blocker is not a broken link.
+                            if not internal and (status in BOT_BLOCK_CODES or BOT_BLOCK_RE.search(link)):
+                                issues.append(_issue("broken_link", "low", page_url,
+                                                     f"External link returns HTTP {status} (likely blocks automated checks): {link}"))
+                            else:
+                                sev = "high" if internal else "medium"
+                                issues.append(_issue("broken_link", sev, page_url,
+                                                     f"Link returns HTTP {status}: {link}"))
 
-        # --- site-wide SEO backend checks (robots.txt + sitemap) ---
-        origin = f"{urlparse(start_url).scheme}://{urlparse(start_url).netloc}"
+        # ---------------- site-wide checks ----------------
+        # robots.txt + sitemap
         try:
-            rr = client.get(origin + "/robots.txt")
-            if rr.status_code >= 400:
+            if client.get(origin + "/robots.txt").status_code >= 400:
                 issues.append(_issue("indexation", "low", origin, "No robots.txt found"))
         except Exception:
             pass
-
         sitemap_found = False
         for path in ("/sitemap.xml", "/sitemap_index.xml", "/wp-sitemap.xml"):
             try:
@@ -195,9 +255,46 @@ def crawl_site(start_url: str) -> dict:
             issues.append(_issue("indexation", "medium", origin,
                                  "No sitemap.xml found — search engines may miss pages"))
 
-    stats = {
-        "pages_crawled": pages_crawled,
-        "links_checked": links_checked,
-        "issues_found": len(issues),
-    }
+        # required pages (via discovered internal links)
+        for name, (keywords, sev) in REQUIRED_PAGES.items():
+            if not any(any(k in p for k in keywords) for p in internal_paths):
+                issues.append(_issue("required_page_missing", sev, origin,
+                                     f"No {name} page found in the site's links"))
+
+        # favicon
+        if homepage_html and not BeautifulSoup(homepage_html, "html.parser").find(
+                "link", attrs={"rel": ICON_RE}):
+            try:
+                if client.get(origin + "/favicon.ico").status_code >= 400:
+                    issues.append(_issue("missing_favicon", "low", origin, "No favicon found"))
+            except Exception:
+                pass
+
+        # security headers (homepage)
+        if homepage_headers:
+            lower = {k.lower(): v for k, v in homepage_headers.items()}
+            missing = [label for h, label in SECURITY_HEADERS.items() if h not in lower]
+            if missing:
+                issues.append(_issue("security_headers", "low", origin,
+                                     "Missing security headers: " + ", ".join(missing)))
+
+        # HTTPS enforcement
+        try:
+            http_resp = client.get("http://" + urlparse(start_url).netloc)
+            if str(http_resp.url).startswith("http://"):
+                issues.append(_issue("no_https", "high", origin,
+                                     "Site does not redirect HTTP to HTTPS"))
+        except Exception:
+            pass
+
+        # duplicate titles
+        seen: dict[str, list[str]] = {}
+        for url, t in titles.items():
+            seen.setdefault(t, []).append(url)
+        for t, urls in seen.items():
+            if len(urls) > 1:
+                issues.append(_issue("duplicate_title", "medium", urls[0],
+                                     f"Title \"{t[:60]}\" is duplicated on {len(urls)} pages"))
+
+    stats = {"pages_crawled": pages_crawled, "links_checked": links_checked, "issues_found": len(issues)}
     return {"issues": issues, "stats": stats}

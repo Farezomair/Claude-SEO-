@@ -11,16 +11,32 @@ covers the categories the current crawler and meta scan produce.
 
 # category -> (group, route, action_class)
 _TABLE = {
-    # Site integrity (Website Auditor group A) -> Website Agent
+    # Site integrity (group A) -> Website Agent
     "broken_page": ("site-integrity", "Website Agent", "auto-safe"),
     "broken_link": ("site-integrity", "Website Agent", "auto-safe"),
+    # Redirects -> SEO Technical (single owner of redirect/canonical execution)
+    "redirect_issue": ("site-integrity", "SEO Technical", "needs-approval"),
     # On-page mechanics / structure (group G) -> Website Agent
     "structure": ("structure", "Website Agent", "needs-approval"),
+    "missing_h1": ("on-page", "Website Agent", "needs-approval"),
+    "multiple_h1": ("on-page", "Website Agent", "needs-approval"),
+    "missing_viewport": ("mobile", "Website Agent", "needs-approval"),
+    "missing_favicon": ("on-page", "Website Agent", "auto-safe"),
+    "images_missing_alt": ("on-page", "Website Agent", "auto-safe"),
     # Crawl & index (group B) -> SEO Technical; index directives forced to gate
     "indexation": ("indexation", "SEO Technical", "needs-approval"),
-    # Meta hygiene (sitewide missing/duplicate) -> SEO Technical, mechanical
+    "missing_canonical": ("indexation", "SEO Technical", "auto-safe"),
+    # Meta hygiene (sitewide missing/duplicate) -> SEO Technical
     "meta_title": ("meta", "SEO Technical", "auto-safe"),
     "meta_description": ("meta", "SEO Technical", "auto-safe"),
+    "missing_title": ("meta", "SEO Technical", "needs-approval"),
+    "duplicate_title": ("meta", "SEO Technical", "needs-approval"),
+    # Required pages (group C) -> Website Agent (legal copy gated)
+    "required_page_missing": ("required-pages", "Website Agent", "needs-approval"),
+    # Security (group F) -> Website Agent
+    "no_https": ("security", "Website Agent", "needs-approval"),
+    "mixed_content": ("security", "Website Agent", "needs-approval"),
+    "security_headers": ("security", "Website Agent", "needs-approval"),
 }
 
 _DEFAULT = ("uncategorized", "Website Agent", "needs-approval")
