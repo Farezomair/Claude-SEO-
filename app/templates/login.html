@@ -1,11 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Log in &middot; SEO Agent System{% endblock %}
 {% block body %}
-<div class="container" style="max-width: 380px; margin-top: 8vh;">
-  <h1>SEO Agent System</h1>
-  <p class="muted" style="margin-top:0;">Sign in to manage your sites.</p>
+<div class="container" style="max-width: 400px; margin-top: 12vh;">
+  <div style="text-align:center; margin-bottom:24px;">
+    <span class="logo-dot" style="width:40px; height:40px; border-radius:12px; margin-bottom:14px;"></span>
+    <h1 style="margin-bottom:4px;">SEO Agent</h1>
+    <p class="muted" style="margin-top:0;">Sign in to manage your sites.</p>
+  </div>
   <div class="card">
-    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    {% if error %}<div class="notice notice-danger">{{ error }}</div>{% endif %}
     <form method="post" action="/login">
       <div class="field">
         <label for="username">Username</label>
@@ -15,7 +18,7 @@
         <label for="password">Password</label>
         <input type="password" id="password" name="password" autocomplete="current-password">
       </div>
-      <button class="btn" type="submit" style="width:100%;">Log in</button>
+      <button class="btn" type="submit" style="width:100%; justify-content:center;">Log in</button>
     </form>
   </div>
 </div>

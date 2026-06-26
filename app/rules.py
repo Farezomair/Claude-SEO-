@@ -12,6 +12,7 @@ SCOPES = [
     ("shared", "Shared rules — apply to every agent"),
     ("seo_technical", "SEO technical agent — meta titles & descriptions"),
     ("content", "Content writer — blog posts"),
+    ("website", "Website agent — visual / CSS changes"),
 ]
 
 

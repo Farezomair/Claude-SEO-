@@ -31,6 +31,12 @@
           </div>
         </details>
       {% endif %}
+      {% if item.code %}
+        <details>
+          <summary style="cursor:pointer; color:var(--accent);">Preview CSS</summary>
+          <pre style="border:1px solid var(--border); border-radius:8px; padding:16px; margin-top:12px; max-height:360px; overflow:auto; background:#0f1219; color:#cbd5e1; font-size:13px; white-space:pre-wrap;">{{ item.code }}</pre>
+        </details>
+      {% endif %}
       <div style="display:flex; gap:8px; margin-top:16px;">
         <form method="post" action="/approvals/{{ item.approval.id }}/approve">
           <button class="btn" type="submit">Approve</button>

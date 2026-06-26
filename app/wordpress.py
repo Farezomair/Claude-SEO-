@@ -90,6 +90,25 @@ class WordPressClient:
         if r.status_code not in (200, 201):
             raise WordPressError(f"HTTP {r.status_code}: {r.text[:200]}")
 
+    def get_custom_css(self) -> str:
+        """Read the site's Additional CSS via the helper plugin endpoint."""
+        with self._client() as c:
+            r = c.get(f"{self.base}/wp-json/seo-agent/v1/custom-css")
+        if r.status_code == 404:
+            raise WordPressError("CSS endpoint not found — update the helper plugin to v1.1 on this site.")
+        if r.status_code != 200:
+            raise WordPressError(f"HTTP {r.status_code} reading custom CSS")
+        return (r.json() or {}).get("css", "") or ""
+
+    def update_custom_css(self, css: str) -> None:
+        """Replace the site's Additional CSS via the helper plugin endpoint."""
+        with self._client() as c:
+            r = c.post(f"{self.base}/wp-json/seo-agent/v1/custom-css", json={"css": css})
+        if r.status_code == 404:
+            raise WordPressError("CSS endpoint not found — update the helper plugin to v1.1 on this site.")
+        if r.status_code not in (200, 201):
+            raise WordPressError(f"HTTP {r.status_code}: {r.text[:200]}")
+
     def create_post(self, title: str, content_html: str, status: str = "draft", excerpt: str = "") -> dict:
         """Create a blog post. status 'draft' keeps it private until published in WP."""
         payload = {"title": title, "content": content_html, "status": status}

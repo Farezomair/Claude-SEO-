@@ -113,3 +113,46 @@ Respond with ONLY a JSON object, no preamble and no markdown fences, in exactly 
         "meta_description": str(data.get("meta_description", "")).strip().strip('"')[:DESC_MAX],
         "body_html": str(data.get("body_html", "")).strip(),
     }
+
+
+def generate_css(site_name: str, site_url: str, request: str,
+                 current_css: str = "", rules: str = "") -> dict:
+    """Produce the COMPLETE new Additional CSS for a visual change request.
+
+    Returns {"css": full_new_css, "summary": short_plain_summary}.
+    """
+    prompt = f"""You are a careful front-end web developer editing a live WordPress site's "Additional CSS".{_rules_block(rules)}
+
+Site: {site_name} ({site_url})
+
+The owner wants this visual change:
+\"\"\"
+{request}
+\"\"\"
+
+Current Additional CSS (may be empty):
+\"\"\"
+{current_css}
+\"\"\"
+
+Produce the COMPLETE new Additional CSS — the existing CSS plus what's needed for the change. Rules:
+- Output valid CSS only (no markdown fences, no HTML).
+- Use reasonably specific selectors. Do NOT use !important unless clearly necessary.
+- Make the smallest change that achieves the request. Never delete unrelated existing rules.
+- This is appended site-wide, so keep it safe and conservative.
+
+Respond with ONLY a JSON object, no preamble, in exactly this shape:
+{{"css": "<the full new Additional CSS>", "summary": "<one plain sentence describing what changed>"}}"""
+
+    response = _get_client().messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=4000,
+        system="You are a front-end developer. You respond only with a single JSON object and nothing else.",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    text = next((b.text for b in response.content if b.type == "text"), "")
+    data = _extract_json(text)
+    return {
+        "css": str(data.get("css", "")).strip(),
+        "summary": str(data.get("summary", "")).strip()[:300],
+    }

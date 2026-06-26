@@ -13,6 +13,9 @@
   {% if tab == 'reports' and latest_weekly_run and latest_weekly_run.status == 'running' %}
   <meta http-equiv="refresh" content="8">
   {% endif %}
+  {% if tab == 'website' and latest_change_run and latest_change_run.status == 'running' %}
+  <meta http-equiv="refresh" content="6">
+  {% endif %}
 {% endblock %}
 {% block body %}
 <div class="container">
@@ -24,6 +27,7 @@
     <a href="/sites/{{ site.id }}?tab=audit"    class="{{ 'active' if tab == 'audit' else '' }}">Audit</a>
     <a href="/sites/{{ site.id }}?tab=fixes"     class="{{ 'active' if tab == 'fixes' else '' }}">Fixes</a>
     <a href="/sites/{{ site.id }}?tab=content"   class="{{ 'active' if tab == 'content' else '' }}">Content</a>
+    <a href="/sites/{{ site.id }}?tab=website"   class="{{ 'active' if tab == 'website' else '' }}">Website</a>
     <a href="/sites/{{ site.id }}?tab=reports"   class="{{ 'active' if tab == 'reports' else '' }}">Reports</a>
     <a href="/sites/{{ site.id }}?tab=settings"  class="{{ 'active' if tab == 'settings' else '' }}">Settings</a>
   </nav>
@@ -35,7 +39,7 @@
         {% if latest_audit %}
           <span class="muted">Last run:</span>
           {{ latest_audit.created_at.strftime('%Y-%m-%d %H:%M UTC') if latest_audit.created_at else '' }}
-          &middot; <strong>{{ latest_audit.status }}</strong>
+          &middot; {{ latest_audit.status | badge }}
         {% else %}
           <span class="muted">No audits run yet.</span>
         {% endif %}
@@ -60,7 +64,7 @@
             <tbody>
               {% for issue in issues %}
               <tr>
-                <td>{{ issue.severity }}</td>
+                <td>{{ issue.severity | badge }}</td>
                 <td>{{ issue.category.replace('_', ' ') }}</td>
                 <td>{{ issue.detail }}</td>
                 <td class="muted">{{ issue.url }}</td>
@@ -82,7 +86,7 @@
         {% if latest_fix_run %}
           <span class="muted">Last run:</span>
           {{ latest_fix_run.created_at.strftime('%Y-%m-%d %H:%M UTC') if latest_fix_run.created_at else '' }}
-          &middot; <strong>{{ latest_fix_run.status }}</strong>
+          &middot; {{ latest_fix_run.status | badge }}
         {% else %}
           <span class="muted">No fix runs yet.</span>
         {% endif %}
@@ -113,7 +117,7 @@
           <tbody>
             {% for fix in fixes %}
             <tr>
-              <td>{{ fix.status }}</td>
+              <td>{{ fix.status | badge }}</td>
               <td>{{ fix.field.replace('_', ' ') if fix.field else '' }}</td>
               <td>{{ fix.new_value }}</td>
               <td class="muted">{{ fix.page_ref }}</td>
@@ -122,6 +126,56 @@
           </tbody>
         </table>
       </div>
+    {% endif %}
+  {% elif tab == 'website' %}
+    {% set running = latest_change_run and latest_change_run.status == 'running' %}
+    <p class="muted" style="margin-top:0;">Describe a visual change in plain English. The agent writes the CSS and sends it to <a href="/approvals">Approvals</a> — nothing goes live until you approve it, and every applied change can be reverted in one click.</p>
+    <form method="post" action="/sites/{{ site.id }}/request-change" style="margin-bottom:16px;">
+      <div class="field">
+        <label for="change">What would you like to change?</label>
+        <input type="text" id="change" name="change" placeholder="e.g. Make the buttons bigger and orange with rounded corners">
+      </div>
+      <button class="btn" type="submit" {{ 'disabled' if running or not connection_active else '' }}>
+        {{ 'Designing…' if running else 'Request change' }}
+      </button>
+    </form>
+
+    {% if not connection_active %}
+      <div class="notice notice-danger">No WordPress connection yet. Set it up in the <a href="/sites/{{ site.id }}?tab=settings">Settings</a> tab first.</div>
+    {% elif notice == 'reverted' %}
+      <div class="notice notice-success">Change reverted — the site is back to how it was.</div>
+    {% elif notice == 'revert_fail' %}
+      <div class="notice notice-danger">Couldn't revert — check the connection and try again.</div>
+    {% elif running %}
+      <div class="empty">Designing your change — this page refreshes automatically.</div>
+    {% elif latest_change_run and latest_change_run.status == 'failed' %}
+      <div class="notice notice-danger">{{ latest_change_run.summary }}</div>
+    {% endif %}
+
+    {% if changes %}
+      <div class="card" style="padding:0; margin-top:16px;">
+        <table>
+          <thead><tr><th>Status</th><th>Request</th><th>When</th><th></th></tr></thead>
+          <tbody>
+            {% for c in changes %}
+            <tr>
+              <td>{{ c.status | badge }}</td>
+              <td>{{ c.request }}</td>
+              <td class="muted">{{ c.created_at.strftime('%Y-%m-%d %H:%M') if c.created_at else '' }}</td>
+              <td>
+                {% if c.status == 'applied' %}
+                <form method="post" action="/sites/{{ site.id }}/changes/{{ c.id }}/revert">
+                  <button class="btn secondary small" type="submit">Revert</button>
+                </form>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty" style="margin-top:8px;">No changes yet. Note: this needs the helper plugin updated to v1.1 (I'll give you the file).</div>
     {% endif %}
   {% elif tab == 'reports' %}
     {% set running = latest_weekly_run and latest_weekly_run.status == 'running' %}
@@ -132,7 +186,7 @@
           {% if scheduler_enabled %}<span style="color:#4ade80;">on</span> — runs itself every {{ interval_days }} days{% else %}<span class="muted">off</span>{% endif %}
           <br>
           <span class="muted">
-            {% if latest_weekly_run %}Last run: {{ latest_weekly_run.created_at.strftime('%Y-%m-%d %H:%M UTC') if latest_weekly_run.created_at else '' }} &middot; {{ latest_weekly_run.status }}{% else %}No weekly run yet.{% endif %}
+            {% if latest_weekly_run %}Last run: {{ latest_weekly_run.created_at.strftime('%Y-%m-%d %H:%M UTC') if latest_weekly_run.created_at else '' }} &middot; {{ latest_weekly_run.status | badge }}{% else %}No weekly run yet.{% endif %}
           </span>
         </div>
         <form method="post" action="/sites/{{ site.id }}/run-weekly">
@@ -191,7 +245,7 @@
           <tbody>
             {% for d in drafts %}
             <tr>
-              <td>{{ d.status.replace('_', ' ') }}</td>
+              <td>{{ d.status | badge }}</td>
               <td>{{ d.title }}</td>
               <td class="muted">{{ d.created_at.strftime('%Y-%m-%d %H:%M') if d.created_at else '' }}</td>
             </tr>

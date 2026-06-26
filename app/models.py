@@ -140,6 +140,26 @@ class Report(Base):
     created_at = Column(DateTime, default=utcnow)
 
 
+class SiteChange(Base):
+    """A live website change proposed by the Website agent (Stage 6).
+
+    Currently CSS-only (the safe, reversible kind). Stores the new CSS and a
+    backup of the previous CSS so any applied change can be reverted in one
+    click. Goes through the approval gate before it touches the live site.
+    """
+
+    __tablename__ = "site_changes"
+
+    id = Column(Integer, primary_key=True)
+    site_id = Column(Integer, ForeignKey("sites.id", ondelete="CASCADE"), nullable=False)
+    kind = Column(String(50), default="website_css")
+    request = Column(Text, default="")     # what the owner asked for
+    css = Column(Text, default="")         # the new Additional CSS to apply
+    old_css = Column(Text, default="")     # backup of the CSS before applying
+    status = Column(String(20), default="proposed")  # proposed/applied/reverted/failed
+    created_at = Column(DateTime, default=utcnow)
+
+
 class Rulebook(Base):
     """Editable agent rules (Stage 6).
 

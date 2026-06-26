@@ -2,43 +2,51 @@
 {% block title %}Websites &middot; SEO Agent System{% endblock %}
 {% block body %}
 <div class="container">
-  <h1>Websites</h1>
-  <p class="muted" style="margin-top:0;">Each site gets its own private workspace.</p>
+  <div class="row-between" style="margin-bottom:24px;">
+    <div>
+      <h1>Websites</h1>
+      <p class="muted" style="margin:0;">Each site gets its own private workspace and crew of agents.</p>
+    </div>
+  </div>
 
   <div class="card">
     <h2>Add a website</h2>
     <form method="post" action="/sites">
-      <div class="field">
-        <label for="name">Name</label>
-        <input type="text" id="name" name="name" placeholder="Acme Co." required>
+      <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+        <div class="field" style="flex:1; min-width:180px; margin-bottom:0;">
+          <label for="name">Name</label>
+          <input type="text" id="name" name="name" placeholder="Acme Co." required>
+        </div>
+        <div class="field" style="flex:2; min-width:220px; margin-bottom:0;">
+          <label for="url">URL</label>
+          <input type="url" id="url" name="url" placeholder="https://acme.com" required>
+        </div>
+        <button class="btn" type="submit">Add website</button>
       </div>
-      <div class="field">
-        <label for="url">URL</label>
-        <input type="url" id="url" name="url" placeholder="https://acme.com" required>
-      </div>
-      <button class="btn" type="submit">Add website</button>
     </form>
   </div>
 
   {% if sites %}
-  <div class="card" style="padding:0;">
-    <table>
-      <thead>
-        <tr><th>Name</th><th>URL</th><th>Added</th></tr>
-      </thead>
-      <tbody>
-        {% for site in sites %}
-        <tr>
-          <td><a href="/sites/{{ site.id }}">{{ site.name }}</a></td>
-          <td class="muted">{{ site.url }}</td>
-          <td class="muted">{{ site.created_at.strftime('%Y-%m-%d') if site.created_at else '' }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:16px; margin-top:20px;">
+    {% for site in sites %}
+    <a href="/sites/{{ site.id }}" class="card" style="display:block; margin:0; transition:transform .12s, border-color .15s;"
+       onmouseover="this.style.transform='translateY(-2px)';this.style.borderColor='#3a4356'"
+       onmouseout="this.style.transform='';this.style.borderColor=''">
+      <div style="display:flex; align-items:center; gap:12px;">
+        <div style="width:38px; height:38px; border-radius:10px; background:linear-gradient(135deg,var(--accent),var(--accent-2)); display:flex; align-items:center; justify-content:center; font-weight:700; color:#fff;">
+          {{ site.name[0]|upper }}
+        </div>
+        <div style="overflow:hidden;">
+          <div style="font-weight:600; color:var(--text);">{{ site.name }}</div>
+          <div class="muted" style="font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ site.url }}</div>
+        </div>
+      </div>
+      <div class="muted" style="font-size:12px; margin-top:14px;">Added {{ site.created_at.strftime('%Y-%m-%d') if site.created_at else '' }}</div>
+    </a>
+    {% endfor %}
   </div>
   {% else %}
-  <div class="empty">No websites yet. Add your first one above.</div>
+  <div class="empty" style="margin-top:20px;">No websites yet. Add your first one above.</div>
   {% endif %}
 </div>
 {% endblock %}

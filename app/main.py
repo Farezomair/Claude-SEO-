@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from fastapi import Depends, FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -22,13 +23,15 @@ from .database import Base, engine, get_db
 from .jobs import start_audit_async
 from .migrations import ensure_columns
 from .models import (
-    Approval, Audit, AuditIssue, Content, Fix, JobRun, Report, RunLog, Site, SiteConnection, utcnow,
+    Approval, Audit, AuditIssue, Content, Fix, JobRun, Report, RunLog, Site,
+    SiteChange, SiteConnection, utcnow,
 )
 from .rules import SCOPES as RULE_SCOPES
 from .rules import get_rules, set_rules
 from .scheduler import ENABLED as SCHEDULER_ENABLED
 from .scheduler import INTERVAL_DAYS, is_due, start_scheduler
 from .seo_technical import start_metafix_async
+from .website_agent import start_change_async
 from .weekly import start_weekly_async
 from .wordpress import WordPressClient, WordPressError
 
@@ -54,6 +57,25 @@ app.add_middleware(
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+
+# Map a status string to a colored badge.
+_BADGE_CLASS = {
+    "verified": "success", "completed": "success", "published": "success",
+    "approved": "success", "connected": "success", "applied": "success",
+    "running": "warning", "pending": "warning", "proposed": "warning",
+    "drafting": "warning", "in wordpress draft": "info", "draft": "neutral",
+    "failed": "danger", "rejected": "danger", "reverted": "neutral",
+    "high": "danger", "medium": "warning", "low": "info",
+}
+
+
+def _badge(status) -> Markup:
+    s = (str(status) or "").replace("_", " ").strip()
+    cls = _BADGE_CLASS.get(s.lower(), "neutral")
+    return Markup(f'<span class="badge badge-{cls}">{s}</span>')
+
+
+templates.env.filters["badge"] = _badge
 
 
 # --------------------------------------------------------------------------
@@ -147,7 +169,7 @@ def site_detail(
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
         return RedirectResponse("/sites", status_code=303)
-    if tab not in {"audit", "fixes", "content", "reports", "settings"}:
+    if tab not in {"audit", "fixes", "content", "website", "reports", "settings"}:
         tab = "audit"
 
     ctx = {
@@ -165,6 +187,8 @@ def site_detail(
         "latest_draft_run": None,
         "drafts": [],
         "reports": [],
+        "changes": [],
+        "latest_change_run": None,
         "latest_weekly_run": None,
         "scheduler_enabled": SCHEDULER_ENABLED,
         "interval_days": INTERVAL_DAYS,
@@ -207,6 +231,18 @@ def site_detail(
             .order_by(Content.created_at.desc()).limit(30).all()
         )
 
+    elif tab == "website":
+        ctx["latest_change_run"] = (
+            db.query(JobRun)
+            .filter(JobRun.site_id == site_id, JobRun.kind == "website")
+            .order_by(JobRun.created_at.desc()).first()
+        )
+        ctx["changes"] = (
+            db.query(SiteChange).filter(SiteChange.site_id == site_id)
+            .order_by(SiteChange.created_at.desc()).limit(30).all()
+        )
+        ctx["connection_active"] = get_connection(site_id, site.url, site.name) is not None
+
     elif tab == "reports":
         ctx["latest_weekly_run"] = (
             db.query(JobRun)
@@ -248,6 +284,54 @@ def run_weekly_now(site_id: int, request: Request, db: Session = Depends(get_db)
         start_weekly_async(site_id, run.id)
 
     return RedirectResponse(f"/sites/{site_id}?tab=reports", status_code=303)
+
+
+@app.post("/sites/{site_id}/request-change")
+def request_change(
+    site_id: int,
+    request: Request,
+    change: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+
+    if change.strip():
+        already = (
+            db.query(JobRun)
+            .filter(JobRun.site_id == site_id, JobRun.kind == "website", JobRun.status == "running")
+            .first()
+        )
+        if not already:
+            run = JobRun(site_id=site_id, kind="website", status="running", summary="Designing change…")
+            db.add(run)
+            db.commit()
+            db.refresh(run)
+            start_change_async(site_id, run.id, change.strip())
+    return RedirectResponse(f"/sites/{site_id}?tab=website", status_code=303)
+
+
+@app.post("/sites/{site_id}/changes/{change_id}/revert")
+def revert_change(site_id: int, change_id: int, request: Request, db: Session = Depends(get_db)):
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    change = db.get(SiteChange, change_id)
+    if not site or not change or change.site_id != site_id or change.status != "applied":
+        return RedirectResponse(f"/sites/{site_id}?tab=website", status_code=303)
+    conn = get_connection(site_id, site.url, site.name)
+    if conn:
+        try:
+            WordPressClient(conn["url"], conn["username"], conn["app_password"]).update_custom_css(change.old_css)
+            change.status = "reverted"
+            db.add(RunLog(site_id=site_id, message=f"Reverted website change: {change.request[:80]}"))
+            db.commit()
+        except WordPressError:
+            return RedirectResponse(f"/sites/{site_id}?tab=website&notice=revert_fail", status_code=303)
+    return RedirectResponse(f"/sites/{site_id}?tab=website&notice=reverted", status_code=303)
 
 
 @app.get("/rules", response_class=HTMLResponse)
@@ -317,15 +401,18 @@ def approvals(request: Request, notice: str = "", db: Session = Depends(get_db))
     )
     items = []
     for appr, site in pending:
-        body = ""
+        body, code = "", ""
+        try:
+            payload = json.loads(appr.payload or "{}")
+        except Exception:
+            payload = {}
         if appr.kind == "content":
-            try:
-                cid = json.loads(appr.payload or "{}").get("content_id")
-                content = db.get(Content, cid) if cid else None
-                body = content.body if content else ""
-            except Exception:
-                body = ""
-        items.append({"approval": appr, "site": site, "body": body})
+            content = db.get(Content, payload.get("content_id")) if payload.get("content_id") else None
+            body = content.body if content else ""
+        elif appr.kind == "website_css":
+            change = db.get(SiteChange, payload.get("change_id")) if payload.get("change_id") else None
+            code = change.css if change else ""
+        items.append({"approval": appr, "site": site, "body": body, "code": code})
     return templates.TemplateResponse(
         "approvals.html",
         {"request": request, "user": current_user(request), "items": items, "notice": notice,
@@ -363,6 +450,24 @@ def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
             message=f"Approved & sent to WordPress ({result.get('status')}): {content.title} {result.get('link', '')}",
         ))
 
+    elif appr.kind == "website_css":
+        payload = json.loads(appr.payload or "{}")
+        change = db.get(SiteChange, payload.get("change_id"))
+        conn = get_connection(site.id, site.url, site.name)
+        if not conn or not change:
+            return RedirectResponse("/approvals?notice=no_connection", status_code=303)
+        try:
+            wp = WordPressClient(conn["url"], conn["username"], conn["app_password"])
+            change.old_css = wp.get_custom_css()  # back up the actual current CSS now
+            wp.update_custom_css(change.css)
+        except WordPressError as exc:
+            change.status = "failed"
+            db.add(RunLog(site_id=site.id, message=f"Website change failed for “{appr.title}”: {exc}"))
+            db.commit()
+            return RedirectResponse("/approvals?notice=publish_fail", status_code=303)
+        change.status = "applied"
+        db.add(RunLog(site_id=site.id, message=f"Applied website change: {change.request[:80]}"))
+
     appr.status = "approved"
     appr.decided_at = utcnow()
     db.commit()
@@ -376,13 +481,18 @@ def reject(approval_id: int, request: Request, db: Session = Depends(get_db)):
     appr = db.get(Approval, approval_id)
     if not appr or appr.status != "pending":
         return RedirectResponse("/approvals", status_code=303)
+    try:
+        payload = json.loads(appr.payload or "{}")
+    except Exception:
+        payload = {}
     if appr.kind == "content":
-        try:
-            content = db.get(Content, json.loads(appr.payload or "{}").get("content_id"))
-            if content:
-                content.status = "rejected"
-        except Exception:
-            pass
+        content = db.get(Content, payload.get("content_id")) if payload.get("content_id") else None
+        if content:
+            content.status = "rejected"
+    elif appr.kind == "website_css":
+        change = db.get(SiteChange, payload.get("change_id")) if payload.get("change_id") else None
+        if change:
+            change.status = "rejected"
     appr.status = "rejected"
     appr.decided_at = utcnow()
     db.commit()
