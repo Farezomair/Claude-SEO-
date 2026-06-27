@@ -15,6 +15,8 @@ REST contract (official WordPress Abilities API):
 two path segments. An ability object carries: name, label, description, category,
 input_schema, output_schema, meta.
 """
+import json
+
 import httpx
 
 REQUEST_TIMEOUT = 30.0
@@ -92,11 +94,27 @@ class AbilitiesClient:
             raise AbilitiesError(f"HTTP {r.status_code}: {r.text[:200]}")
         return r.json() or {}
 
-    def run(self, name: str, input_data: dict | None = None) -> dict:
-        """Execute an ability. Input is sent under the `input` key per the spec."""
-        body = {"input": input_data or {}}
+    def read(self, name: str, input_data: dict | None = None) -> dict:
+        """Run a READ-ONLY ability. These require GET with input as a query param."""
+        return self.run(name, input_data, method="GET")
+
+    def run(self, name: str, input_data: dict | None = None, method: str = "POST") -> dict:
+        """Execute an ability.
+
+        Write abilities take POST with input under the `input` key. Read-only
+        abilities require GET with input as a URL-encoded `input` query param; if
+        a POST is rejected with 405 (rest_ability_invalid_method) we transparently
+        retry as GET, so callers don't need to know which is which.
+        """
+        url = f"{self.base}{API_BASE}/abilities/{name}/run"
+        input_data = input_data or {}
         with self._client() as c:
-            r = c.post(f"{self.base}{API_BASE}/abilities/{name}/run", json=body)
+            if method.upper() == "GET":
+                r = c.get(url, params={"input": json.dumps(input_data)})
+            else:
+                r = c.post(url, json={"input": input_data})
+                if r.status_code == 405 and "invalid_method" in r.text:
+                    r = c.get(url, params={"input": json.dumps(input_data)})
         if r.status_code == 404:
             raise AbilitiesUnavailable(f"Ability '{name}' not found.")
         if r.status_code in (401, 403):

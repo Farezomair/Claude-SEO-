@@ -643,8 +643,8 @@ def elementor_probe(site_id: int, request: Request, page_id: int = 0,
     P = "hostinger-ai-assistant"
     out: dict = {}
     try:
-        out["list_pages"] = client.run(f"{P}/elementor-list-pages",
-                                       {"post_type": "page", "post_status": "publish", "limit": 20})
+        out["list_pages"] = client.read(f"{P}/elementor-list-pages",
+                                        {"post_type": "page", "post_status": "publish", "limit": 20})
     except (AbilitiesError, AbilitiesUnavailable) as exc:
         return JSONResponse({"error": f"list-pages failed: {exc}"}, status_code=200)
 
@@ -669,7 +669,7 @@ def elementor_probe(site_id: int, request: Request, page_id: int = 0,
              {"post_id": page_id, "widget_types": ["heading", "text-editor", "button"], "include_settings": True}),
         ):
             try:
-                out[label] = client.run(name, payload)
+                out[label] = client.read(name, payload)
             except (AbilitiesError, AbilitiesUnavailable) as exc:
                 out[label] = {"error": str(exc)}
     return JSONResponse(out)
