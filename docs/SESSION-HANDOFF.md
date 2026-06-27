@@ -134,7 +134,44 @@ REST endpoints. Re-categorized honestly:
 - **❌ Not WordPress at all (REST can't help):** backlinks/off-page, GBP/local,
   competitor data — need external API connectors.
 
-## 8. >>> NEXT STEP (start here) <<<
+## 8. >>> ARCHITECTURE UPDATE (latest session — read this first) <<<
+**The helper-plugin-v1.2 plan below is SUPERSEDED.** We found a far better,
+fully-headless execution layer already live on the site: the **official WordPress
+Abilities API** (`wp-abilities/v1`) + MCP Adapter, authenticated with the
+Application Password we already store. No third-party relay, no interactive OAuth.
+(WPVibe/"Vibe AI" was evaluated and rejected: interactive-OAuth + hosted relay
+only — useless for an unattended app. See memory `ascend-execution-layer`.)
+
+- **New code:** `abilities.py` (`AbilitiesClient`: `read`/`run`; GET for read-only
+  abilities with PHP bracket-notation params, POST for writes), `elementor_agent.py`
+  (the flagship doer). Discovery routes in `main.py`: `GET /sites/{id}/abilities`
+  (catalog) and `GET /sites/{id}/elementor-probe` (page widget shapes). Public
+  `GET /version` returns the `BUILD` marker to confirm a Railway deploy is live.
+- **Catalog:** 111 abilities — full reference in `docs/abilities-catalog.md`.
+  Reach now includes Elementor page editing, alt text, menus/internal links,
+  LiteSpeed presets (CWV), site settings, and `plugin-install` (self-provisioning).
+- **Page architecture (important):** every Meridian page is ONE Elementor `html`
+  widget holding a full hand-built HTML document (likely AI-builder output); there
+  are no separate heading/text widgets. Pages are already fairly SEO-strong.
+- **DONE this session — Elementor On-page agent:** full-page SEO rewrite, gated,
+  with a live visual preview (sandboxed iframe in Approvals), safety checks
+  (truncation / lost style·script·links·images / banned words), a saved snapshot +
+  one-click Revert, and verify-after-write. `brain.rewrite_page_html` STREAMS (the
+  non-streaming call hit the SDK's 10-min guard). Write path: `apply_html` tries
+  `elementor-update-widget-content`, falls back to a surgical `_elementor_data`
+  edit. Trigger: Website tab → "Rewrite for SEO" per page (`JobRun` kind
+  `elementor`, Approval kind `page_rewrite`). PROVEN end-to-end on Grill Repair.
+
+**NEXT STEP options (pick with owner):** (a) make it self-running — wire rewrites
+into the weekly Conductor loop + a "rewrite all pages" batch + fix the
+auto-refresh-to-completion UX; (b) more Abilities doers — alt text at scale,
+internal-link insertion between service/location pages, LiteSpeed CWV preset,
+redirects via self-installed Redirection plugin; (c) add a copy-only diff view to
+the approval; (d) consolidate/retire the now-partly-redundant `seo-agent-connector`
+helper plugin.
+
+---
+### (historical, SUPERSEDED) original v1.2 plan
 **Extend the helper plugin to v1.2** to unlock category ✅, then build the doers
 that use it:
 1. Add REST endpoints to `wordpress-plugin/seo-agent-connector.php`:
