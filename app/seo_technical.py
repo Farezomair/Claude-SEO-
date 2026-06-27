@@ -24,7 +24,7 @@ from .rules import rules_for
 from .wordpress import YOAST_DESC_KEY, YOAST_TITLE_KEY, WordPressClient, WordPressError
 
 # Hard caps / thresholds (guardrails).
-MAX_FIXES = 10
+MAX_FIXES = 25
 TITLE_MIN, TITLE_MAX = 30, 60
 DESC_MIN, DESC_MAX = 70, 160
 
@@ -152,6 +152,16 @@ def run_metafix(site_id: int, run_id: int, conn: dict) -> None:
                 finding.status = "closed" if verified else "reopened"
                 db.commit()
                 fixes_made += 1
+
+        # Flush the page cache so the new Yoast meta actually shows on the live
+        # pages (and so the next audit sees it, instead of a stale cached copy).
+        if fixes_made:
+            try:
+                from .abilities import AbilitiesClient
+                AbilitiesClient(conn["url"], conn["username"], conn["app_password"]).run(
+                    "hostinger-ai-assistant/litespeed-cache-flush", {})
+            except Exception:
+                pass
 
         run.status = "completed"
         run.summary = (

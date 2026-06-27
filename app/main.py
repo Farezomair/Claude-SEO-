@@ -68,7 +68,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "dispatcher-11"
+BUILD = "reports-chart-pkt-12"
 
 
 @app.get("/version")
@@ -102,6 +102,26 @@ def _badge(status) -> Markup:
 
 
 templates.env.filters["badge"] = _badge
+
+
+def _pkt(dt) -> str:
+    """Format a naive-UTC datetime in the owner's timezone (GMT+5, PKT)."""
+    if not dt:
+        return ""
+    return (dt + timedelta(hours=5)).strftime("%Y-%m-%d %H:%M") + " PKT"
+
+
+templates.env.filters["pkt"] = _pkt
+
+
+def _mark_stale(db, run, minutes: int = 10) -> None:
+    """A run stuck 'running' past `minutes` (worker lost on a recycle) is failed
+    so the UI unblocks and the owner can retry."""
+    if (run and run.status == "running" and run.created_at
+            and (utcnow() - run.created_at) > timedelta(minutes=minutes)):
+        run.status = "failed"
+        run.summary = (run.summary or "") + " (timed out)"
+        db.commit()
 
 
 # --------------------------------------------------------------------------
@@ -180,6 +200,24 @@ def add_site(
         db.add(Site(name=name, url=url))
         db.commit()
     return RedirectResponse("/sites", status_code=303)
+
+
+def _build_chart(points: list[dict]):
+    """Compute SVG polyline coords for the issues + health-score-over-time chart."""
+    if len(points) < 2:
+        return None
+    W, H, pad = 580, 150, 26
+    max_i = max((p["issues"] for p in points), default=1) or 1
+    n = len(points)
+    for i, p in enumerate(points):
+        p["x"] = round(pad + (W - 2 * pad) * (i / (n - 1)), 1)
+        p["yi"] = round(H - pad - (H - 2 * pad) * (p["issues"] / max_i), 1)
+        p["ys"] = round(H - pad - (H - 2 * pad) * (min(p["score"], 100) / 100), 1)
+    return {
+        "w": W, "h": H, "max_i": max_i, "points": points,
+        "issues_pts": " ".join(f"{p['x']},{p['yi']}" for p in points),
+        "score_pts": " ".join(f"{p['x']},{p['ys']}" for p in points),
+    }
 
 
 _PIPELINE_STAGES = ["audit", "route", "fix", "report"]
@@ -281,6 +319,7 @@ def site_detail(
             db.query(Report).filter(Report.site_id == site_id)
             .order_by(Report.created_at.desc()).first()
         )
+        _mark_stale(db, latest_weekly)
         ctx["pipeline"] = _pipeline_state(latest_weekly, latest_report.id if latest_report else None)
         ctx["latest_report"] = latest_report
         ctx["weekly_running"] = bool(latest_weekly and latest_weekly.status == "running")
@@ -300,6 +339,7 @@ def site_detail(
             db.query(JobRun).filter(JobRun.site_id == site_id, JobRun.kind == "fix")
             .order_by(JobRun.created_at.desc()).first()
         )
+        _mark_stale(db, latest_fix)
         ctx["fix_running"] = bool(latest_fix and latest_fix.status == "running")
         ctx["latest_fix"] = latest_fix
 
@@ -425,6 +465,16 @@ def site_detail(
             ctx["audit_roadmap"] = json.loads(latest_audit.roadmap) if latest_audit and latest_audit.roadmap else []
         except Exception:
             ctx["audit_categories"], ctx["audit_roadmap"] = [], []
+        # Improvement chart: issues + health score across past audits (oldest→newest).
+        hist = (
+            db.query(Audit).filter(Audit.site_id == site_id, Audit.status == "completed")
+            .order_by(Audit.created_at.asc()).limit(12).all()
+        )
+        points = []
+        for a in hist:
+            n = db.query(Finding).filter(Finding.audit_id == a.id).count()
+            points.append({"date": a.created_at, "score": a.health_score or 0, "issues": n})
+        ctx["chart"] = _build_chart(points)
         # "What changed — before & after" feed for the report view.
         recs = (
             db.query(FixRecord)
