@@ -9,7 +9,7 @@ import os
 from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 from sqlalchemy.orm import Session
@@ -38,6 +38,7 @@ from .seo_technical import start_dedupe_async, start_metafix_async
 from .website_agent import start_change_async, start_page_drafts_async
 from .weekly import start_weekly_async
 from .wordpress import YOAST_DESC_KEY, YOAST_TITLE_KEY, WordPressClient, WordPressError
+from .abilities import AbilitiesClient, AbilitiesError, AbilitiesUnavailable
 
 # Whether approved content is sent to WordPress as a draft (safe — needs a final
 # Publish click in WP) or published live. Defaults to draft.
@@ -570,6 +571,55 @@ def draft_pages(site_id: int, request: Request, db: Session = Depends(get_db)):
         db.refresh(run)
         start_page_drafts_async(site_id, run.id)
     return RedirectResponse(f"/sites/{site_id}?tab=audit", status_code=303)
+
+
+@app.get("/sites/{site_id}/abilities")
+def discover_abilities(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """Build-time discovery: list the site's registered Abilities API catalog.
+
+    Ascend introspects the live WordPress site with its own stored Application
+    Password (no human in the loop) so we can see exactly what the headless
+    execution layer can do, then design doers against real abilities.
+    """
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return JSONResponse({"error": "site not found"}, status_code=404)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return JSONResponse(
+            {"error": "No WordPress connection — set it up in Settings first."},
+            status_code=400,
+        )
+    client = AbilitiesClient(conn["url"], conn["username"], conn["app_password"])
+    try:
+        abilities = client.list_abilities()
+    except AbilitiesUnavailable as exc:
+        return JSONResponse(
+            {"available": False, "reason": str(exc),
+             "hint": "The site does not expose wp-abilities/v1 to this user."},
+            status_code=200,
+        )
+    except AbilitiesError as exc:
+        return JSONResponse({"available": True, "error": str(exc)}, status_code=200)
+
+    catalog = []
+    for a in abilities:
+        catalog.append({
+            "name": a.get("name"),
+            "label": a.get("label"),
+            "description": a.get("description"),
+            "category": a.get("category"),
+            "input_schema": a.get("input_schema"),
+        })
+    catalog.sort(key=lambda x: (x.get("category") or "", x.get("name") or ""))
+    return JSONResponse({
+        "available": True,
+        "site": site.url,
+        "count": len(catalog),
+        "abilities": catalog,
+    })
 
 
 # --------------------------------------------------------------------------
