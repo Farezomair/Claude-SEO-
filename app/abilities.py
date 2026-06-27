@@ -15,13 +15,34 @@ REST contract (official WordPress Abilities API):
 two path segments. An ability object carries: name, label, description, category,
 input_schema, output_schema, meta.
 """
-import json
-
 import httpx
 
 REQUEST_TIMEOUT = 30.0
 USER_AGENT = "SEO-Agent/1.0"
 API_BASE = "/wp-json/wp-abilities/v1"
+
+
+def _get_params(value, prefix: str = "input") -> list[tuple[str, str]]:
+    """Flatten an input dict into PHP bracket-notation query params.
+
+    WordPress/PHP parses `input[post_type]=page&input[tags][]=1` into a nested
+    object/array. A raw JSON string in `input=` is seen as a string and rejected
+    ("input is not of type object"), so read-only (GET) abilities need this form.
+    """
+    params: list[tuple[str, str]] = []
+    if isinstance(value, dict):
+        for k, v in value.items():
+            params.extend(_get_params(v, f"{prefix}[{k}]"))
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            params.extend(_get_params(v, f"{prefix}[]"))
+    elif isinstance(value, bool):  # before int/str: bool is a subclass of int
+        params.append((prefix, "true" if value else "false"))
+    elif value is None:
+        pass
+    else:
+        params.append((prefix, str(value)))
+    return params
 
 
 class AbilitiesError(Exception):
@@ -110,11 +131,11 @@ class AbilitiesClient:
         input_data = input_data or {}
         with self._client() as c:
             if method.upper() == "GET":
-                r = c.get(url, params={"input": json.dumps(input_data)})
+                r = c.get(url, params=_get_params(input_data))
             else:
                 r = c.post(url, json={"input": input_data})
                 if r.status_code == 405 and "invalid_method" in r.text:
-                    r = c.get(url, params={"input": json.dumps(input_data)})
+                    r = c.get(url, params=_get_params(input_data))
         if r.status_code == 404:
             raise AbilitiesUnavailable(f"Ability '{name}' not found.")
         if r.status_code in (401, 403):
