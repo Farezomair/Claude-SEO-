@@ -4,6 +4,9 @@
   {% if tab == 'audit' and latest_audit and latest_audit.status == 'running' %}
   <meta http-equiv="refresh" content="5">
   {% endif %}
+  {% if tab == 'audit' and page_draft_running %}
+  <meta http-equiv="refresh" content="6">
+  {% endif %}
   {% if tab == 'fixes' and latest_fix_run and latest_fix_run.status == 'running' %}
   <meta http-equiv="refresh" content="6">
   {% endif %}
@@ -57,6 +60,16 @@
       <div class="card"><div class="error">{{ latest_audit.summary }}</div></div>
     {% elif latest_audit and latest_audit.status == 'completed' %}
       <div class="card"><p style="margin:0;">{{ latest_audit.summary }}</p></div>
+      {% if draftable_pages and page_connection_active %}
+        <div class="card row-between">
+          <div>The Website Agent can draft <strong>{{ draftable_pages }} missing page(s)</strong> for your review.</div>
+          <form method="post" action="/sites/{{ site.id }}/draft-pages">
+            <button class="btn small" type="submit" {{ 'disabled' if page_draft_running else '' }}>
+              {{ 'Drafting…' if page_draft_running else 'Draft missing pages' }}
+            </button>
+          </form>
+        </div>
+      {% endif %}
       {% if findings %}
         <div class="card" style="padding:0;">
           <table>

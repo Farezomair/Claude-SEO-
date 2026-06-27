@@ -31,7 +31,7 @@ from .rules import get_rules, set_rules
 from .scheduler import ENABLED as SCHEDULER_ENABLED
 from .scheduler import INTERVAL_DAYS, is_due, start_scheduler
 from .seo_technical import start_metafix_async
-from .website_agent import start_change_async
+from .website_agent import start_change_async, start_page_drafts_async
 from .weekly import start_weekly_async
 from .wordpress import WordPressClient, WordPressError
 
@@ -216,6 +216,14 @@ def site_detail(
             findings = db.query(Finding).filter(Finding.audit_id == latest_audit.id).all()
             findings.sort(key=lambda f: (severity_rank.get(f.severity, 5), f.category))
             ctx["findings"] = findings
+            # Phase C: how many missing-page findings the Website Agent can draft.
+            ctx["draftable_pages"] = sum(1 for f in findings if f.category == "required_page_missing")
+            ctx["page_draft_running"] = (
+                db.query(JobRun).filter(
+                    JobRun.site_id == site_id, JobRun.kind == "pagedraft", JobRun.status == "running"
+                ).first() is not None
+            )
+            ctx["page_connection_active"] = get_connection(site_id, site.url, site.name) is not None
 
     elif tab == "fixes":
         ctx["latest_fix_run"] = (
@@ -394,6 +402,28 @@ def draft_content(
     return RedirectResponse(f"/sites/{site_id}?tab=content", status_code=303)
 
 
+@app.post("/sites/{site_id}/draft-pages")
+def draft_pages(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """Website Agent: draft the missing required pages the auditor flagged."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+    already = (
+        db.query(JobRun)
+        .filter(JobRun.site_id == site_id, JobRun.kind == "pagedraft", JobRun.status == "running")
+        .first()
+    )
+    if not already:
+        run = JobRun(site_id=site_id, kind="pagedraft", status="running", summary="Drafting missing pages…")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        start_page_drafts_async(site_id, run.id)
+    return RedirectResponse(f"/sites/{site_id}?tab=audit", status_code=303)
+
+
 # --------------------------------------------------------------------------
 # Approvals (the safety gate)
 # --------------------------------------------------------------------------
@@ -415,7 +445,7 @@ def approvals(request: Request, notice: str = "", db: Session = Depends(get_db))
             payload = json.loads(appr.payload or "{}")
         except Exception:
             payload = {}
-        if appr.kind == "content":
+        if appr.kind in ("content", "required_page"):
             content = db.get(Content, payload.get("content_id")) if payload.get("content_id") else None
             body = content.body if content else ""
         elif appr.kind == "website_css":
@@ -459,6 +489,25 @@ def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
             message=f"Approved & sent to WordPress ({result.get('status')}): {content.title} {result.get('link', '')}",
         ))
 
+    elif appr.kind == "required_page":
+        payload = json.loads(appr.payload or "{}")
+        content = db.get(Content, payload.get("content_id"))
+        conn = get_connection(site.id, site.url, site.name)
+        if not conn or not content:
+            return RedirectResponse("/approvals?notice=no_connection", status_code=303)
+        try:
+            wp = WordPressClient(conn["url"], conn["username"], conn["app_password"])
+            result = wp.create_page(content.title, content.body, status="draft")
+        except WordPressError as exc:
+            db.add(RunLog(site_id=site.id, message=f"Page create failed for “{appr.title}”: {exc}"))
+            db.commit()
+            return RedirectResponse("/approvals?notice=publish_fail", status_code=303)
+        content.status = "in_wordpress_draft"
+        finding = db.get(Finding, payload.get("finding_id"))
+        if finding:
+            finding.status = "closed"
+        db.add(RunLog(site_id=site.id, message=f"Created page (draft) in WordPress: {content.title} {result.get('link', '')}"))
+
     elif appr.kind == "website_css":
         payload = json.loads(appr.payload or "{}")
         change = db.get(SiteChange, payload.get("change_id"))
@@ -494,10 +543,14 @@ def reject(approval_id: int, request: Request, db: Session = Depends(get_db)):
         payload = json.loads(appr.payload or "{}")
     except Exception:
         payload = {}
-    if appr.kind == "content":
+    if appr.kind in ("content", "required_page"):
         content = db.get(Content, payload.get("content_id")) if payload.get("content_id") else None
         if content:
             content.status = "rejected"
+        if appr.kind == "required_page":
+            finding = db.get(Finding, payload.get("finding_id")) if payload.get("finding_id") else None
+            if finding:
+                finding.status = "open"  # back to the queue
     elif appr.kind == "website_css":
         change = db.get(SiteChange, payload.get("change_id")) if payload.get("change_id") else None
         if change:

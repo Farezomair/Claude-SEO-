@@ -115,6 +115,54 @@ Respond with ONLY a JSON object, no preamble and no markdown fences, in exactly 
     }
 
 
+LEGAL_PAGES = {"privacy", "terms"}
+PAGE_BRIEFS = {
+    "privacy": "a Privacy Policy",
+    "terms": "a Terms of Service (Terms and Conditions) page",
+    "about": "an About page introducing the business",
+    "contact": "a Contact page",
+    "accessibility": "an Accessibility Statement",
+}
+
+
+def generate_page(site_name: str, site_url: str, page_type: str, rules: str = "") -> dict:
+    """Draft a missing required page. Returns {"title", "body_html", "legal"}."""
+    brief = PAGE_BRIEFS.get(page_type, f"a {page_type} page")
+    legal = page_type in LEGAL_PAGES
+    if legal:
+        guidance = ("This is a legal page. Produce a clear, standard, GENERAL template. "
+                    "Use bracketed placeholders like [Business Address], [Contact Email], "
+                    "[Jurisdiction] where specifics are needed. Do NOT invent specific legal "
+                    "terms, jurisdictions, or data practices — keep it general and leave "
+                    "placeholders for the owner to complete with a professional.")
+    else:
+        guidance = ("Write helpful, specific content for this business. Use bracketed "
+                    "placeholders like [phone], [address], [email] for details you don't know.")
+
+    prompt = f"""Write {brief} for the website {site_name} ({site_url}).{_rules_block(rules)}
+
+{guidance}
+
+Format the body as simple HTML using only <h2>, <h3>, <p>, <ul>, <li>, <strong>. Do NOT
+include an <h1> (the title is separate) and do NOT wrap it in <html> or <body>.
+
+Respond with ONLY a JSON object, no preamble, in exactly this shape:
+{{"title": "...", "body_html": "..."}}"""
+
+    response = _get_client().messages.create(
+        model=ANTHROPIC_MODEL, max_tokens=4000,
+        system="You write clean website pages. You respond only with a single JSON object.",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    text = next((b.text for b in response.content if b.type == "text"), "")
+    data = _extract_json(text)
+    return {
+        "title": str(data.get("title", "")).strip().strip('"')[:120],
+        "body_html": str(data.get("body_html", "")).strip(),
+        "legal": legal,
+    }
+
+
 def generate_css(site_name: str, site_url: str, request: str,
                  current_css: str = "", rules: str = "") -> dict:
     """Produce the COMPLETE new Additional CSS for a visual change request.

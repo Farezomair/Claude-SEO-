@@ -111,11 +111,18 @@ class WordPressClient:
 
     def create_post(self, title: str, content_html: str, status: str = "draft", excerpt: str = "") -> dict:
         """Create a blog post. status 'draft' keeps it private until published in WP."""
+        return self._create("posts", title, content_html, status, excerpt)
+
+    def create_page(self, title: str, content_html: str, status: str = "draft") -> dict:
+        """Create a WordPress page (e.g. a missing privacy/about page) as a draft."""
+        return self._create("pages", title, content_html, status, "")
+
+    def _create(self, kind: str, title: str, content_html: str, status: str, excerpt: str) -> dict:
         payload = {"title": title, "content": content_html, "status": status}
         if excerpt:
             payload["excerpt"] = excerpt
         with self._client() as c:
-            r = c.post(f"{self.base}/wp-json/wp/v2/posts", json=payload)
+            r = c.post(f"{self.base}/wp-json/wp/v2/{kind}", json=payload)
         if r.status_code not in (200, 201):
             raise WordPressError(f"HTTP {r.status_code}: {r.text[:200]}")
         data = r.json() or {}

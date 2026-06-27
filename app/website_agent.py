@@ -7,14 +7,88 @@ and because the previous CSS is backed up, any applied change can be reverted in
 one click. CSS-only by design: it cannot take the site down.
 """
 import json
+import re
 import threading
 
-from .brain import generate_css
+from .brain import generate_css, generate_page
 from .connections import get_connection
 from .database import SessionLocal
-from .models import Approval, JobRun, RunLog, Site, SiteChange
+from .models import Approval, Content, Finding, JobRun, RunLog, Site, SiteChange
 from .rules import rules_for
 from .wordpress import WordPressClient, WordPressError
+
+
+def _page_type(issue: str) -> str:
+    m = re.search(r"No (\w+) page", issue or "")
+    return m.group(1).lower() if m else "page"
+
+
+def run_page_drafts(site_id: int, run_id: int) -> None:
+    """Draft the missing required pages the auditor flagged, route to approval."""
+    db = SessionLocal()
+    try:
+        run = db.get(JobRun, run_id)
+        site = db.get(Site, site_id)
+        findings = (
+            db.query(Finding)
+            .filter(Finding.site_id == site_id,
+                    Finding.category == "required_page_missing",
+                    Finding.status == "open")
+            .all()
+        )
+        if not findings:
+            run.status = "completed"
+            run.summary = "No missing required pages to draft."
+            db.commit()
+            return
+
+        drafted = 0
+        for f in findings:
+            page_type = _page_type(f.issue)
+            try:
+                page = generate_page(site.name, site.url, page_type, rules_for("shared", "content"))
+            except Exception as exc:
+                db.add(RunLog(site_id=site_id, message=f"Page draft failed for {page_type}: {exc.__class__.__name__}"))
+                db.commit()
+                continue
+            if not page.get("title") or not page.get("body_html"):
+                continue
+
+            content = Content(site_id=site_id, title=page["title"], body=page["body_html"], status="draft")
+            db.add(content)
+            db.commit()
+            db.refresh(content)
+
+            summary = "New page draft — review before publishing."
+            if page.get("legal"):
+                summary += " This is a legal page template — review with a qualified professional and fill in the [bracketed] placeholders before publishing."
+            db.add(Approval(
+                site_id=site_id, kind="required_page",
+                title=f"Create {page_type} page: {page['title']}",
+                summary=summary,
+                payload=json.dumps({"content_id": content.id, "finding_id": f.id, "page_type": page_type}),
+                status="pending",
+            ))
+            f.status = "in-progress"
+            drafted += 1
+            db.commit()
+
+        run.status = "completed"
+        run.summary = f"Drafted {drafted} missing page(s) — waiting for your approval."
+        db.add(RunLog(site_id=site_id, message=run.summary))
+        db.commit()
+    except Exception as exc:
+        run = db.get(JobRun, run_id)
+        if run:
+            run.status = "failed"
+            run.summary = f"Run failed: {exc.__class__.__name__}: {exc}"
+            db.commit()
+    finally:
+        db.close()
+
+
+def start_page_drafts_async(site_id: int, run_id: int) -> None:
+    threading.Thread(target=run_page_drafts, args=(site_id, run_id), daemon=True).start()
 
 
 def run_change(site_id: int, run_id: int, request_text: str) -> None:
