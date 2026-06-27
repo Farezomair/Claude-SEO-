@@ -298,13 +298,16 @@ Here is the page HTML to improve:
 {current_html}
 \"\"\""""
 
-    response = _get_client().messages.create(
+    # Full-page rewrites can be large, so stream: the SDK refuses a non-streaming
+    # call whose max_tokens could exceed the 10-minute request limit.
+    with _get_client().messages.stream(
         model=ANTHROPIC_MODEL,
-        max_tokens=32000,
+        max_tokens=24000,
         system="You are an SEO web developer. You improve a page's visible copy while preserving its structure, CSS, and scripts exactly. You output raw HTML followed by a one-line summary after a ===SUMMARY=== marker.",
         messages=[{"role": "user", "content": prompt}],
-    )
-    text = next((b.text for b in response.content if b.type == "text"), "")
+    ) as stream:
+        final = stream.get_final_message()
+    text = next((b.text for b in final.content if b.type == "text"), "")
     html_part, _, summary = text.partition("===SUMMARY===")
     return {
         "html": _strip_fences(html_part),
