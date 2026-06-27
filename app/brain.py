@@ -315,6 +315,57 @@ Here is the page HTML to improve:
     }
 
 
+CONTENT_CATS = {"eeat_weak", "content_shallow", "content_stale", "geo_unstructured"}
+CONTENT_SEV = {"low", "medium", "high"}
+
+
+def analyze_page_content(site_name: str, url: str, title: str, text: str) -> dict:
+    """Claude judges ONE page for content quality, E-E-A-T, and AI citability.
+
+    Returns {"content_score": int, "geo_score": int, "findings": [issue dicts]}
+    where each finding is {category, severity, detail} using the CONTENT_CATS.
+    """
+    prompt = f"""You are a strict senior SEO content auditor. Assess ONE page for content quality, E-E-A-T, and AI-search (GEO) citability. Be specific to THIS page — never generic.
+
+Site: {site_name}
+URL: {url}
+Title: {title}
+
+Visible page text (may be truncated):
+\"\"\"
+{text[:6000]}
+\"\"\"
+
+Judge:
+- E-E-A-T: a named author or clear business identity, credentials/real experience, trust signals (contact, specifics, guarantees), accurate non-generic info.
+- Depth & usefulness: does it fully serve the page's intent, or is it thin/filler?
+- Freshness: signals it is outdated (old years, stale references)?
+- AI citability (GEO): clear quotable facts/stats, a direct answer near the top, and structured/Q&A passages an AI assistant could lift.
+
+Respond with ONLY a JSON object, no preamble:
+{{"content_score": 0-100, "geo_score": 0-100, "findings": [{{"category": "eeat_weak|content_shallow|content_stale|geo_unstructured", "severity": "low|medium|high", "detail": "specific, actionable observation about THIS page"}}]}}
+At most 4 findings. Only include REAL problems (omit findings if the page is strong)."""
+
+    response = _get_client().messages.create(
+        model=ANTHROPIC_MODEL, max_tokens=1500,
+        system="You are an SEO content auditor. You respond only with a single JSON object.",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw = next((b.text for b in response.content if b.type == "text"), "")
+    data = _extract_json(raw)
+    findings = []
+    for f in (data.get("findings") or [])[:4]:
+        cat, sev = f.get("category"), f.get("severity")
+        detail = str(f.get("detail", "")).strip()
+        if cat in CONTENT_CATS and sev in CONTENT_SEV and detail:
+            findings.append({"category": cat, "severity": sev, "detail": detail})
+    return {
+        "content_score": int(data.get("content_score") or 0),
+        "geo_score": int(data.get("geo_score") or 0),
+        "findings": findings,
+    }
+
+
 def generate_css(site_name: str, site_url: str, request: str,
                  current_css: str = "", rules: str = "") -> dict:
     """Produce the COMPLETE new Additional CSS for a visual change request.

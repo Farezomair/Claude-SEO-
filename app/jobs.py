@@ -8,12 +8,14 @@ entry when it finishes.
 import json
 import threading
 
+from .content_analyzer import analyze_site_content
 from .crawler import crawl_site
 from .database import SessionLocal
 from .gsc import gsc_findings
-from .models import Audit, Finding, RunLog
+from .models import Audit, Finding, RunLog, Site
+from .perf import analyze_performance
 from .routing import classify
-from .scoring import compute as compute_score
+from .scoring import MEASURED, compute as compute_score
 
 
 def _run_audit(site_id: int, audit_id: int, start_url: str) -> None:
@@ -38,6 +40,21 @@ def _run_audit(site_id: int, audit_id: int, start_url: str) -> None:
         except Exception:
             pass  # GSC is best-effort; never let it break the audit
 
+        # Phase 2 specialists (best-effort; never break the audit).
+        measured = set(MEASURED)
+        site = db.get(Site, site_id)
+        try:
+            all_issues += analyze_site_content(start_url, site.name if site else "")
+        except Exception:
+            pass
+        try:
+            perf_issues, perf_ok = analyze_performance(start_url)
+            all_issues += perf_issues
+            if perf_ok:
+                measured.add("performance")
+        except Exception:
+            pass
+
         for seq, iss in enumerate(all_issues, start=1):
             cls = classify(iss["category"])
             db.add(Finding(
@@ -51,7 +68,7 @@ def _run_audit(site_id: int, audit_id: int, start_url: str) -> None:
                 status="open",
             ))
         # Score the audit (the rebuilt auditor: graded + prioritized, not a flat list).
-        scored = compute_score(all_issues)
+        scored = compute_score(all_issues, measured)
         audit.health_score = scored["overall"]
         audit.grade = scored["grade"]
         audit.category_scores = json.dumps(scored["categories"])
