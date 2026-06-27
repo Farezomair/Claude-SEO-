@@ -13,6 +13,9 @@
   {% if tab == 'content' and latest_draft_run and latest_draft_run.status == 'running' %}
   <meta http-equiv="refresh" content="6">
   {% endif %}
+  {% if tab == 'content' and latest_correction_run and latest_correction_run.status == 'running' %}
+  <meta http-equiv="refresh" content="6">
+  {% endif %}
   {% if tab == 'reports' and latest_weekly_run and latest_weekly_run.status == 'running' %}
   <meta http-equiv="refresh" content="8">
   {% endif %}
@@ -254,6 +257,20 @@
       <div class="card"><p style="margin:0;">{{ latest_draft_run.summary }}
         <a href="/approvals">Review in Approvals →</a></p></div>
     {% endif %}
+
+    {% set fixing = latest_correction_run and latest_correction_run.status == 'running' %}
+    <div class="card row-between">
+      <div>
+        <strong>Content Corrector</strong>
+        <div class="muted" style="font-size:13px;">Scans your blog posts and cleans them to the writing standard (no em dashes, no AI vocabulary), meaning preserved. Gated before anything changes.</div>
+        {% if latest_correction_run and not fixing %}<div class="muted" style="font-size:13px; margin-top:6px;">{{ latest_correction_run.summary }} {% if 'drafted' in latest_correction_run.summary %}<a href="/approvals">Review →</a>{% endif %}</div>{% endif %}
+      </div>
+      <form method="post" action="/sites/{{ site.id }}/correct-content">
+        <button class="btn secondary small" type="submit" {{ 'disabled' if fixing or not content_connection_active else '' }}>
+          {{ 'Scanning…' if fixing else 'Clean up content' }}
+        </button>
+      </form>
+    </div>
 
     {% if drafts %}
       <div class="card" style="padding:0; margin-top:16px;">

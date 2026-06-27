@@ -12,6 +12,7 @@ import threading
 
 from .brain import generate_css, generate_page
 from .connections import get_connection
+from .content_standard import strip_em_dashes
 from .database import SessionLocal
 from .models import Approval, Content, Finding, JobRun, RunLog, Site, SiteChange
 from .rules import rules_for
@@ -54,7 +55,8 @@ def run_page_drafts(site_id: int, run_id: int) -> None:
             if not page.get("title") or not page.get("body_html"):
                 continue
 
-            content = Content(site_id=site_id, title=page["title"], body=page["body_html"], status="draft")
+            content = Content(site_id=site_id, title=page["title"],
+                              body=strip_em_dashes(page["body_html"]), status="draft")
             db.add(content)
             db.commit()
             db.refresh(content)

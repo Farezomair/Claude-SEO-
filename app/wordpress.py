@@ -128,6 +128,13 @@ class WordPressClient:
         data = r.json() or {}
         return {"id": data.get("id"), "link": data.get("link", ""), "status": data.get("status", status)}
 
+    def update_content(self, kind: str, item_id: int, content_html: str) -> None:
+        """Replace a post/page's content body (used by the Content Corrector)."""
+        with self._client() as c:
+            r = c.post(f"{self.base}/wp-json/wp/v2/{kind}/{item_id}", json={"content": content_html})
+        if r.status_code not in (200, 201):
+            raise WordPressError(f"HTTP {r.status_code}: {r.text[:200]}")
+
     @staticmethod
     def _normalize(kind: str, item: dict) -> dict:
         title = ((item.get("title") or {}).get("rendered") or "").strip()
@@ -140,4 +147,5 @@ class WordPressClient:
             "title": title,
             "meta": item.get("meta") or {},
             "content_text": text[:1800],
+            "content_html": html,
         }

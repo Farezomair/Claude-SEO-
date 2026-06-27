@@ -8,6 +8,7 @@ import json
 import threading
 
 from .brain import generate_article
+from .content_standard import strip_em_dashes
 from .database import SessionLocal
 from .models import Approval, Content, JobRun, RunLog, Site
 from .rules import rules_for
@@ -36,7 +37,7 @@ def run_draft(site_id: int, run_id: int, topic: str = "") -> None:
         content = Content(
             site_id=site_id,
             title=article["title"],
-            body=article["body_html"],
+            body=strip_em_dashes(article["body_html"]),  # enforce the standard
             status="draft",
         )
         db.add(content)

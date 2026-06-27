@@ -10,7 +10,19 @@ import re
 
 import anthropic
 
+from .content_standard import BANNED
+
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-8")
+
+# The writing standard, injected into every content-generation prompt.
+WRITING_STANDARD = (
+    "\n\nWriting standard (MANDATORY):\n"
+    "- Never use em dashes (—). Use periods, commas, colons, or parentheses.\n"
+    "- Never use these words or close variants: " + ", ".join(BANNED) + ".\n"
+    "- No filler openers ('In today's fast-paced world') or closing restatements.\n"
+    "- No empty connectives ('it is important to note', 'when it comes to').\n"
+    "- Vary sentence length. Be definitive and plain. Every sentence carries information."
+)
 
 TITLE_MAX = 60
 DESC_MAX = 160
@@ -94,6 +106,7 @@ Website: {site_url}
 Write a complete, genuinely useful blog post (about 600-800 words). Be concrete and helpful to a real reader considering this business's services. Avoid fluff and generic filler.
 
 Format the body as simple HTML using only <h2>, <h3>, <p>, <ul>, <li>, and <strong> tags. Do NOT include an <h1> (the title is separate), and do NOT wrap it in <html> or <body>.
+{WRITING_STANDARD}
 
 Respond with ONLY a JSON object, no preamble and no markdown fences, in exactly this shape:
 {{"title": "...", "meta_description": "...", "body_html": "..."}}
@@ -145,6 +158,7 @@ def generate_page(site_name: str, site_url: str, page_type: str, rules: str = ""
 
 Format the body as simple HTML using only <h2>, <h3>, <p>, <ul>, <li>, <strong>. Do NOT
 include an <h1> (the title is separate) and do NOT wrap it in <html> or <body>.
+{WRITING_STANDARD}
 
 Respond with ONLY a JSON object, no preamble, in exactly this shape:
 {{"title": "...", "body_html": "..."}}"""
@@ -161,6 +175,35 @@ Respond with ONLY a JSON object, no preamble, in exactly this shape:
         "body_html": str(data.get("body_html", "")).strip(),
         "legal": legal,
     }
+
+
+def correct_content(title: str, body_html: str, rules: str = "") -> dict:
+    """Editorial cleanup of EXISTING content: strip em dashes, banned vocabulary,
+    filler, and padding while PRESERVING meaning and every factual claim.
+    Returns {"body_html": cleaned}."""
+    prompt = f"""You are a careful copy editor. Rewrite the page content below to meet the
+writing standard, WITHOUT changing its meaning, facts, claims, or structure. Do not add
+new claims, statistics, or sections. Do not remove information. Only fix the writing.{_rules_block(rules)}
+{WRITING_STANDARD}
+
+Page title: {title}
+
+Content (HTML):
+\"\"\"
+{body_html}
+\"\"\"
+
+Keep the same HTML tags and structure. Respond with ONLY a JSON object, no preamble:
+{{"body_html": "<the cleaned HTML>"}}"""
+
+    response = _get_client().messages.create(
+        model=ANTHROPIC_MODEL, max_tokens=8000,
+        system="You are a copy editor. You preserve meaning and respond only with a single JSON object.",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    text = next((b.text for b in response.content if b.type == "text"), "")
+    data = _extract_json(text)
+    return {"body_html": str(data.get("body_html", "")).strip()}
 
 
 def generate_css(site_name: str, site_url: str, request: str,

@@ -18,6 +18,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from .auth import check_credentials, current_user
 from .connections import get_connection
 from .content_agent import start_draft_async
+from .content_corrector import start_correction_async
+from .content_standard import scan
 from .crypto import encrypt
 from .database import Base, engine, get_db
 from .jobs import start_audit_async
@@ -243,6 +245,12 @@ def site_detail(
             .filter(JobRun.site_id == site_id, JobRun.kind == "content_draft")
             .order_by(JobRun.created_at.desc()).first()
         )
+        ctx["latest_correction_run"] = (
+            db.query(JobRun)
+            .filter(JobRun.site_id == site_id, JobRun.kind == "contentfix")
+            .order_by(JobRun.created_at.desc()).first()
+        )
+        ctx["content_connection_active"] = get_connection(site_id, site.url, site.name) is not None
         ctx["drafts"] = (
             db.query(Content).filter(Content.site_id == site_id)
             .order_by(Content.created_at.desc()).limit(30).all()
@@ -402,6 +410,31 @@ def draft_content(
     return RedirectResponse(f"/sites/{site_id}?tab=content", status_code=303)
 
 
+@app.post("/sites/{site_id}/correct-content")
+def correct_content_route(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """Content Corrector: scan blog posts and draft writing-standard cleanups."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return RedirectResponse(f"/sites/{site_id}?tab=settings&notice=test_none", status_code=303)
+    already = (
+        db.query(JobRun)
+        .filter(JobRun.site_id == site_id, JobRun.kind == "contentfix", JobRun.status == "running")
+        .first()
+    )
+    if not already:
+        run = JobRun(site_id=site_id, kind="contentfix", status="running", summary="Scanning content…")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        start_correction_async(site_id, run.id, conn)
+    return RedirectResponse(f"/sites/{site_id}?tab=content", status_code=303)
+
+
 @app.post("/sites/{site_id}/draft-pages")
 def draft_pages(site_id: int, request: Request, db: Session = Depends(get_db)):
     """Website Agent: draft the missing required pages the auditor flagged."""
@@ -445,7 +478,7 @@ def approvals(request: Request, notice: str = "", db: Session = Depends(get_db))
             payload = json.loads(appr.payload or "{}")
         except Exception:
             payload = {}
-        if appr.kind in ("content", "required_page"):
+        if appr.kind in ("content", "required_page", "content_fix"):
             content = db.get(Content, payload.get("content_id")) if payload.get("content_id") else None
             body = content.body if content else ""
         elif appr.kind == "website_css":
@@ -488,6 +521,38 @@ def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
             site_id=site.id,
             message=f"Approved & sent to WordPress ({result.get('status')}): {content.title} {result.get('link', '')}",
         ))
+
+    elif appr.kind == "content_fix":
+        payload = json.loads(appr.payload or "{}")
+        content = db.get(Content, payload.get("content_id"))
+        conn = get_connection(site.id, site.url, site.name)
+        if not conn or not content:
+            return RedirectResponse("/approvals?notice=no_connection", status_code=303)
+        kind, page_id = payload.get("page_kind", "posts"), payload.get("page_id")
+        try:
+            wp = WordPressClient(conn["url"], conn["username"], conn["app_password"])
+            # Snapshot current content for rollback, then update.
+            before = ""
+            for it in wp.list_content(kinds=(kind,), limit=60):
+                if it["id"] == page_id:
+                    before = it["content_html"]
+                    break
+            wp.update_content(kind, page_id, content.body)
+        except WordPressError as exc:
+            db.add(RunLog(site_id=site.id, message=f"Content cleanup failed for “{appr.title}”: {exc}"))
+            db.commit()
+            return RedirectResponse("/approvals?notice=publish_fail", status_code=303)
+        after_clean = scan(content.body)
+        db.add(FixRecord(
+            site_id=site.id, doer="Content Corrector",
+            action_taken=f"Editorial cleanup of {content.title}",
+            page_ref=str(page_id), before_value=before[:5000], after_value=content.body[:5000],
+            method="gate-approved", lane="gated", applied=True,
+            verification_verdict="verified" if not after_clean["banned"] and after_clean["em_dashes"] == 0 else "partial",
+            status="done",
+        ))
+        content.status = "published"
+        db.add(RunLog(site_id=site.id, message=f"Applied content cleanup: {content.title}"))
 
     elif appr.kind == "required_page":
         payload = json.loads(appr.payload or "{}")
@@ -543,7 +608,7 @@ def reject(approval_id: int, request: Request, db: Session = Depends(get_db)):
         payload = json.loads(appr.payload or "{}")
     except Exception:
         payload = {}
-    if appr.kind in ("content", "required_page"):
+    if appr.kind in ("content", "required_page", "content_fix"):
         content = db.get(Content, payload.get("content_id")) if payload.get("content_id") else None
         if content:
             content.status = "rejected"
