@@ -40,6 +40,7 @@ from .elementor_agent import (
     apply_html, copy_diff, list_elementor_pages, start_page_rewrite_async, verify_html,
 )
 from .weekly import start_weekly_async
+from .dispatcher import start_dispatch_async
 from .wordpress import YOAST_DESC_KEY, YOAST_TITLE_KEY, WordPressClient, WordPressError
 from .abilities import AbilitiesClient, AbilitiesError, AbilitiesUnavailable
 
@@ -67,7 +68,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "audit-in-report-10"
+BUILD = "dispatcher-11"
 
 
 @app.get("/version")
@@ -295,6 +296,12 @@ def site_detail(
             ctx["audit_roadmap"] = json.loads(latest_audit.roadmap) if latest_audit and latest_audit.roadmap else []
         except Exception:
             ctx["audit_categories"], ctx["audit_roadmap"] = [], []
+        latest_fix = (
+            db.query(JobRun).filter(JobRun.site_id == site_id, JobRun.kind == "fix")
+            .order_by(JobRun.created_at.desc()).first()
+        )
+        ctx["fix_running"] = bool(latest_fix and latest_fix.status == "running")
+        ctx["latest_fix"] = latest_fix
 
     elif tab == "audit":
         latest_audit = (
@@ -762,6 +769,31 @@ def discover_abilities(site_id: int, request: Request, db: Session = Depends(get
         "count": len(catalog),
         "abilities": catalog,
     })
+
+
+@app.post("/sites/{site_id}/run-fixes")
+def run_fixes(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """Dispatcher: apply safe fixes now and send risky ones to Approvals."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return RedirectResponse(f"/sites/{site_id}?tab=settings&notice=test_none", status_code=303)
+    already = (
+        db.query(JobRun)
+        .filter(JobRun.site_id == site_id, JobRun.kind == "fix", JobRun.status == "running")
+        .first()
+    )
+    if not already:
+        run = JobRun(site_id=site_id, kind="fix", status="running", summary="Applying fixes…")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        start_dispatch_async(site_id, run.id)
+    return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
 
 
 @app.post("/sites/{site_id}/rewrite-page")

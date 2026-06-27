@@ -13,11 +13,10 @@ and cross-week state land in Phase F.
 import threading
 from collections import Counter
 
-from .connections import get_connection
 from .database import SessionLocal
+from .dispatcher import dispatch_fixes
 from .jobs import _run_audit
 from .models import Audit, Finding, FixRecord, JobRun, Report, RunLog, Site
-from .seo_technical import run_metafix
 
 
 def _build_report(db, site, audit, issue_count: int, fixes_applied: int) -> None:
@@ -83,21 +82,12 @@ def run_weekly(site_id: int, weekly_run_id: int) -> None:
         # Phase 2 — Route (findings are already classified/owned by the auditor).
         _phase("route", findings=issue_count)
 
-        # Phase 4 — Dispatch/execute (meta fixes, only if connected).
+        # Phase 4 — Dispatch: route open findings to their doers (safe fixes auto,
+        # risky ones to Approvals).
         _phase("fix", findings=issue_count)
-        conn = get_connection(site_id, site.url, site.name)
-        fixes_applied = 0
-        if conn:
-            before = db.query(FixRecord).filter(FixRecord.site_id == site_id).count()
-            mf = JobRun(site_id=site_id, kind="metafix", status="running", summary="Weekly meta fixes…")
-            db.add(mf)
-            db.commit()
-            db.refresh(mf)
-            run_metafix(site_id, mf.id, conn)  # synchronous (creates Findings + Fix records + verifies)
-            fixes_applied = db.query(FixRecord).filter(FixRecord.site_id == site_id).count() - before
-            steps.append(f"applied {fixes_applied} fix(es)")
-        else:
-            steps.append("skipped fixes (no connection)")
+        disp = dispatch_fixes(site_id)
+        fixes_applied = disp["auto"]
+        steps.append(disp["summary"])
 
         # Phase 5 — Compile (report from Findings + Fix records).
         _phase("report", findings=issue_count, fixes=fixes_applied)

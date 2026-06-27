@@ -31,6 +31,9 @@
   {% if tab == 'website' and elementor_running %}
   <meta http-equiv="refresh" content="6">
   {% endif %}
+  {% if tab == 'command' and fix_running %}
+  <meta http-equiv="refresh" content="5">
+  {% endif %}
 {% endblock %}
 {% block body %}
 <div class="container">
@@ -117,13 +120,19 @@
               <h2 style="margin:0;">Pipeline</h2>
               <p class="muted" id="cc-summary" style="margin:3px 0 0; font-size:13px;">{{ pipeline.summary or 'Idle — start a run to audit the site, apply fixes, and compile a report.' }}</p>
             </div>
-            <div style="display:flex; gap:10px; align-items:center;">
+            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
               <form method="post" action="/sites/{{ site.id }}/run-weekly">
                 <button class="btn" id="cc-run" type="submit" {{ 'disabled' if weekly_running else '' }}>{{ 'Crew working…' if weekly_running else '▶ Start full run' }}</button>
+              </form>
+              <form method="post" action="/sites/{{ site.id }}/run-fixes">
+                <button class="btn secondary" type="submit" {{ 'disabled' if weekly_running or fix_running else '' }}>{{ 'Fixing…' if fix_running else 'Apply fixes' }}</button>
               </form>
               <a class="btn secondary" id="cc-viewreport" href="/sites/{{ site.id }}?tab=reports" {{ '' if latest_report else 'style=display:none;' }}>View report</a>
             </div>
           </div>
+          {% if latest_fix and not fix_running and latest_fix.summary %}
+            <div class="notice notice-muted" style="margin-top:4px;">Last fix run: {{ latest_fix.summary }}</div>
+          {% endif %}
 
           <div class="pipeline" id="cc-pipeline">
             {% for s in pipeline.stages %}
