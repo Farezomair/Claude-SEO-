@@ -13,6 +13,7 @@ Checks (all crawl-based, no external API):
 - required pages : privacy / contact / about / terms / accessibility present
 - security       : HTTPS enforced, mixed content, core security headers
 """
+import json
 import re
 from urllib.parse import urljoin, urlparse
 
@@ -54,6 +55,38 @@ SECURITY_HEADERS = {
     "x-frame-options": "X-Frame-Options",
     "x-content-type-options": "X-Content-Type-Options",
 }
+
+# Thin-content: skip short-by-nature utility pages; flag real content pages below
+# the threshold.
+THIN_THRESHOLD = 250
+UTILITY_PATHS = ("contact", "privacy", "terms", "about", "cart", "checkout",
+                 "login", "account", "thank", "search", "404")
+
+# Schema validation (grounded in the seo-schema skill).
+DEPRECATED_SCHEMA = {"howto", "faqpage"}  # HowTo removed; FAQ restricted to gov/health
+PLACEHOLDER_MARKERS = ("lorem ipsum", "your business name", "example.com",
+                       "placeholder", "{{", "xxxxx", "todo")
+
+
+def _schema_types(data) -> set:
+    """Collect every @type string anywhere in a JSON-LD blob (lowercased)."""
+    found: set[str] = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            t = node.get("@type")
+            if isinstance(t, str):
+                found.add(t.lower())
+            elif isinstance(t, list):
+                found.update(str(x).lower() for x in t)
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(data)
+    return found
 
 MAX_PAGES = 30
 MAX_LINK_CHECKS = 150
@@ -98,11 +131,13 @@ def crawl_site(start_url: str) -> dict:
     if not start_url.startswith(("http://", "https://")):
         start_url = "https://" + start_url
 
+    home_norm = _normalize(start_url)
     issues: list[dict] = []
     visited: set[str] = set()
-    queue: list[str] = [_normalize(start_url)]
+    queue: list[str] = [home_norm]
     checked_links: dict[str, int | None] = {}
     reported_broken: set[str] = set()
+    schema_reported: set[str] = set()   # dedupe template-wide schema issues
     internal_paths: set[str] = set()
     titles: dict[str, str] = {}            # url -> title (for duplicate detection)
     pages_crawled = 0
@@ -180,6 +215,48 @@ def crawl_site(start_url: str) -> dict:
             if no_alt:
                 issues.append(_issue("images_missing_alt", "low", page_url,
                                      f"{len(no_alt)} of {len(imgs)} images missing alt text"))
+
+            # --- thin content (SEO Auditor group C) ---
+            path = urlparse(page_url).path.lower()
+            if not any(u in path for u in UTILITY_PATHS):
+                word_count = len(soup.get_text(" ", strip=True).split())
+                if word_count < THIN_THRESHOLD:
+                    issues.append(_issue("thin_content", "medium", page_url,
+                                         f"Thin content: about {word_count} words for this page"))
+
+            # --- schema validity (SEO Auditor group F; template-wide dedup) ---
+            ld_scripts = soup.find_all("script", attrs={"type": re.compile(r"ld\+json", re.I)})
+            if not ld_scripts and page_url == home_norm:
+                issues.append(_issue("missing_schema", "low", page_url,
+                                     "No structured data (JSON-LD) on the homepage"))
+            for s in ld_scripts:
+                raw = s.string or s.get_text() or ""
+                if not raw.strip():
+                    continue
+                if "schema_invalid" not in schema_reported:
+                    try:
+                        parsed = json.loads(raw)
+                    except Exception:
+                        schema_reported.add("schema_invalid")
+                        issues.append(_issue("schema_invalid", "medium", page_url,
+                                             "Structured data (JSON-LD) is not valid JSON"))
+                        continue
+                else:
+                    try:
+                        parsed = json.loads(raw)
+                    except Exception:
+                        continue
+                if "schema_placeholder" not in schema_reported and any(
+                        m in raw.lower() for m in PLACEHOLDER_MARKERS):
+                    schema_reported.add("schema_placeholder")
+                    issues.append(_issue("schema_placeholder", "medium", page_url,
+                                         "Structured data contains placeholder/template text"))
+                if "schema_deprecated" not in schema_reported:
+                    bad = _schema_types(parsed) & DEPRECATED_SCHEMA
+                    if bad:
+                        schema_reported.add("schema_deprecated")
+                        issues.append(_issue("schema_deprecated", "low", page_url,
+                                             f"Structured data uses a deprecated/restricted type: {', '.join(sorted(bad))}"))
 
             # --- security: mixed content on HTTPS pages ---
             if page_url.startswith("https://") and MIXED_CONTENT_RE.search(resp.text):
