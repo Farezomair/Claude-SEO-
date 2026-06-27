@@ -187,6 +187,7 @@ def crawl_site(start_url: str) -> dict:
     reported_broken: set[str] = set()
     schema_reported: set[str] = set()   # dedupe template-wide schema issues
     internal_paths: set[str] = set()
+    ok_paths: set[str] = set()   # paths that actually returned 200 HTML (for required-page presence)
     linked_internal: set[str] = set()   # internal URLs seen as links (for orphan detection)
     titles: dict[str, str] = {}            # url -> title (for duplicate detection)
     pages_crawled = 0
@@ -217,6 +218,7 @@ def crawl_site(start_url: str) -> dict:
                 continue
             if "text/html" not in resp.headers.get("content-type", ""):
                 continue
+            ok_paths.add((urlparse(page_url).path.lower() or "/"))
 
             # Redirect issue: a chain longer than one hop, or a temporary (302).
             if len(resp.history) >= 2:
@@ -433,8 +435,10 @@ def crawl_site(start_url: str) -> dict:
                                      "Page is in the sitemap but not linked from any other page"))
 
         # required pages (via discovered internal links)
+        # Present only if the page actually loads (200). A required page that is
+        # linked but 404s (e.g. a footer /privacy link with no page) is MISSING.
         for name, (keywords, sev) in REQUIRED_PAGES.items():
-            if not any(any(k in p for k in keywords) for p in internal_paths):
+            if not any(any(k in p for k in keywords) for p in ok_paths):
                 issues.append(_issue("required_page_missing", sev, origin,
                                      f"No {name} page found in the site's links"))
 

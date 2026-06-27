@@ -68,7 +68,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "skill-knowledge-13"
+BUILD = "approval-dedup-privacy-chart-14"
 
 
 @app.get("/version")
@@ -203,19 +203,22 @@ def add_site(
 
 
 def _build_chart(points: list[dict]):
-    """Compute SVG polyline coords for the issues + health-score-over-time chart."""
+    """SVG polyline coords for issues + fixes + health-score over time."""
     if len(points) < 2:
         return None
     W, H, pad = 580, 150, 26
-    max_i = max((p["issues"] for p in points), default=1) or 1
+    # Issues and fixes share a count axis; score uses its own 0-100 axis.
+    count_max = max([p["issues"] for p in points] + [p.get("fixes", 0) for p in points] + [1])
     n = len(points)
     for i, p in enumerate(points):
         p["x"] = round(pad + (W - 2 * pad) * (i / (n - 1)), 1)
-        p["yi"] = round(H - pad - (H - 2 * pad) * (p["issues"] / max_i), 1)
+        p["yi"] = round(H - pad - (H - 2 * pad) * (p["issues"] / count_max), 1)
+        p["yf"] = round(H - pad - (H - 2 * pad) * (p.get("fixes", 0) / count_max), 1)
         p["ys"] = round(H - pad - (H - 2 * pad) * (min(p["score"], 100) / 100), 1)
     return {
-        "w": W, "h": H, "max_i": max_i, "points": points,
+        "w": W, "h": H, "max_i": count_max, "points": points,
         "issues_pts": " ".join(f"{p['x']},{p['yi']}" for p in points),
+        "fixes_pts": " ".join(f"{p['x']},{p['yf']}" for p in points),
         "score_pts": " ".join(f"{p['x']},{p['ys']}" for p in points),
     }
 
@@ -471,9 +474,16 @@ def site_detail(
             .order_by(Audit.created_at.asc()).limit(12).all()
         )
         points = []
-        for a in hist:
+        for idx, a in enumerate(hist):
             n = db.query(Finding).filter(Finding.audit_id == a.id).count()
-            points.append({"date": a.created_at, "score": a.health_score or 0, "issues": n})
+            # Fixes applied in this run's window (from this audit until the next).
+            fq = db.query(FixRecord).filter(
+                FixRecord.site_id == site_id, FixRecord.applied == True,  # noqa: E712
+                FixRecord.created_at >= a.created_at)
+            if idx + 1 < len(hist):
+                fq = fq.filter(FixRecord.created_at < hist[idx + 1].created_at)
+            points.append({"date": a.created_at, "score": a.health_score or 0,
+                           "issues": n, "fixes": fq.count()})
         ctx["chart"] = _build_chart(points)
         # "What changed — before & after" feed for the report view.
         recs = (
@@ -928,6 +938,23 @@ def elementor_probe(site_id: int, request: Request, page_id: int = 0,
 def approvals(request: Request, notice: str = "", db: Session = Depends(get_db)):
     if not current_user(request):
         return RedirectResponse("/login", status_code=303)
+    # Collapse duplicate pending approvals (same site + kind + title) — keep the
+    # newest, reject the rest — so re-runs don't show the same item many times.
+    dupes = (
+        db.query(Approval).filter(Approval.status == "pending")
+        .order_by(Approval.created_at.desc()).all()
+    )
+    seen_keys: set = set()
+    collapsed = False
+    for a in dupes:
+        key = (a.site_id, a.kind, a.title)
+        if key in seen_keys:
+            a.status = "superseded"
+            collapsed = True
+        else:
+            seen_keys.add(key)
+    if collapsed:
+        db.commit()
     pending = (
         db.query(Approval, Site)
         .join(Site, Approval.site_id == Site.id)

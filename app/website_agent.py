@@ -43,9 +43,28 @@ def run_page_drafts(site_id: int, run_id: int) -> None:
             db.commit()
             return
 
+        # Don't re-draft a page that already has a pending approval (avoids the
+        # duplicate "Create X page" pile-up when audits re-run).
+        pending = (
+            db.query(Approval)
+            .filter(Approval.site_id == site_id, Approval.kind == "required_page",
+                    Approval.status == "pending")
+            .all()
+        )
+        already: set[str] = set()
+        for a in pending:
+            try:
+                already.add(json.loads(a.payload or "{}").get("page_type"))
+            except Exception:
+                pass
+
         drafted = 0
         for f in findings:
             page_type = _page_type(f.issue)
+            if page_type in already:
+                f.status = "in-progress"  # already proposed; don't duplicate
+                db.commit()
+                continue
             try:
                 page = generate_page(site.name, site.url, page_type, rules_for("shared", "content"))
             except Exception as exc:
@@ -72,6 +91,7 @@ def run_page_drafts(site_id: int, run_id: int) -> None:
                 status="pending",
             ))
             f.status = "in-progress"
+            already.add(page_type)
             drafted += 1
             db.commit()
 
