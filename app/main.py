@@ -6,7 +6,7 @@ prove we can build, deploy, and store isolated per-site data.
 """
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -37,7 +37,7 @@ from .onpage_agent import start_meta_rewrites_async
 from .seo_technical import start_dedupe_async, start_metafix_async
 from .website_agent import start_change_async, start_page_drafts_async
 from .elementor_agent import (
-    apply_html, list_elementor_pages, start_page_rewrite_async, verify_html,
+    apply_html, copy_diff, list_elementor_pages, start_page_rewrite_async, verify_html,
 )
 from .weekly import start_weekly_async
 from .wordpress import YOAST_DESC_KEY, YOAST_TITLE_KEY, WordPressClient, WordPressError
@@ -67,7 +67,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "elementor-rewrite-stream-5"
+BUILD = "elementor-polish-6"
 
 
 @app.get("/version")
@@ -299,16 +299,22 @@ def site_detail(
         conn_w = get_connection(site_id, site.url, site.name)
         ctx["connection_active"] = conn_w is not None
         ctx["elementor_pages"] = list_elementor_pages(conn_w) if conn_w else []
-        ctx["elementor_running"] = (
-            db.query(JobRun).filter(
-                JobRun.site_id == site_id, JobRun.kind == "elementor", JobRun.status == "running"
-            ).first() is not None
-        )
-        ctx["latest_elementor_run"] = (
+        latest_el = (
             db.query(JobRun)
             .filter(JobRun.site_id == site_id, JobRun.kind == "elementor")
             .order_by(JobRun.created_at.desc()).first()
         )
+        # Stale-job guard: a rewrite that's been "running" too long means the worker
+        # was lost (e.g. a server recycle). Mark it failed so the UI unblocks and the
+        # owner can retry, instead of refreshing on "Rewriting…" forever.
+        if (latest_el and latest_el.status == "running" and latest_el.created_at
+                and (utcnow() - latest_el.created_at) > timedelta(minutes=5)):
+            latest_el.status = "failed"
+            latest_el.summary = "Timed out (the rewrite worker was interrupted). Please try again."
+            db.add(RunLog(site_id=site_id, message=f"Elementor run #{latest_el.id} marked stale after 5 min."))
+            db.commit()
+        ctx["latest_elementor_run"] = latest_el
+        ctx["elementor_running"] = bool(latest_el and latest_el.status == "running")
 
     elif tab == "reports":
         ctx["latest_weekly_run"] = (
@@ -740,7 +746,7 @@ def approvals(request: Request, notice: str = "", db: Session = Depends(get_db))
     )
     items = []
     for appr, site in pending:
-        body, code, preview_html = "", "", ""
+        body, code, preview_html, text_diff = "", "", "", []
         try:
             payload = json.loads(appr.payload or "{}")
         except Exception:
@@ -753,9 +759,11 @@ def approvals(request: Request, notice: str = "", db: Session = Depends(get_db))
             code = change.css if change else ""
         elif appr.kind == "page_rewrite":
             change = db.get(SiteChange, payload.get("change_id")) if payload.get("change_id") else None
-            preview_html = change.css if change else ""
+            if change:
+                preview_html = change.css
+                text_diff = copy_diff(change.old_css, change.css)
         items.append({"approval": appr, "site": site, "body": body, "code": code,
-                      "preview_html": preview_html})
+                      "preview_html": preview_html, "text_diff": text_diff})
     return templates.TemplateResponse(
         "approvals.html",
         {"request": request, "user": current_user(request), "items": items, "notice": notice,

@@ -7,8 +7,11 @@ CSS, and scripts, runs safety checks, and routes the change to the approval gate
 with a saved snapshot for one-click rollback. Nothing touches the live page until
 the owner approves — and approval/revert both go through `apply_html`.
 """
+import difflib
 import json
 import threading
+
+from bs4 import BeautifulSoup
 
 from .abilities import AbilitiesClient, AbilitiesError, AbilitiesUnavailable
 from .brain import rewrite_page_html
@@ -97,6 +100,36 @@ def verify_html(client: AbilitiesClient, page_id: int, expected_html: str) -> bo
         return False
     sample = (expected_html or "")[:400].strip()
     return bool(sample) and sample in (live or "")
+
+
+# -- copy diff (for the approval) --------------------------------------------
+def _visible_lines(html: str) -> list[str]:
+    """Human-visible text lines of a page, with style/script/markup stripped."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    for t in soup(["style", "script", "noscript"]):
+        t.decompose()
+    return [ln.strip() for ln in soup.get_text("\n").splitlines() if ln.strip()]
+
+
+def copy_diff(old_html: str, new_html: str, max_lines: int = 500) -> list[tuple[str, str]]:
+    """Return [(kind, text), ...] where kind is 'add' | 'del' | 'ctx', diffing the
+    VISIBLE COPY (not the markup) so the owner can read exactly what wording
+    changed alongside the visual preview."""
+    old, new = _visible_lines(old_html), _visible_lines(new_html)
+    out: list[tuple[str, str]] = []
+    for line in difflib.unified_diff(old, new, lineterm="", n=1):
+        if line.startswith(("+++", "---", "@@")):
+            continue
+        if line.startswith("+"):
+            out.append(("add", line[1:].strip()))
+        elif line.startswith("-"):
+            out.append(("del", line[1:].strip()))
+        else:
+            out.append(("ctx", line.strip()))
+        if len(out) >= max_lines:
+            out.append(("ctx", "… (diff truncated)"))
+            break
+    return out
 
 
 # -- safety checks -----------------------------------------------------------

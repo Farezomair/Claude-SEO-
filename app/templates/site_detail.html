@@ -28,6 +28,9 @@
   {% if tab == 'website' and latest_change_run and latest_change_run.status == 'running' %}
   <meta http-equiv="refresh" content="6">
   {% endif %}
+  {% if tab == 'website' and elementor_running %}
+  <meta http-equiv="refresh" content="6">
+  {% endif %}
 {% endblock %}
 {% block body %}
 <div class="container">
