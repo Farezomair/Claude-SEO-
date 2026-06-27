@@ -51,6 +51,28 @@ _TABLE = {
     "schema_invalid": ("schema", "SEO Technical", "needs-approval"),
     "schema_placeholder": ("schema", "SEO Technical", "auto-safe"),
     "schema_deprecated": ("schema", "SEO Technical", "auto-safe"),
+    # On-page depth (expanded battery)
+    "meta_description_missing": ("meta", "SEO Technical", "auto-safe"),
+    "title_length": ("meta", "SEO Technical", "auto-safe"),
+    "heading_hierarchy": ("on-page", "SEO On-page", "needs-approval"),
+    "low_internal_links": ("on-page", "SEO On-page", "needs-approval"),
+    # Images (group D)
+    "image_no_dimensions": ("images", "Website Agent", "needs-approval"),
+    "image_legacy_format": ("images", "Website Agent", "needs-approval"),
+    # AI / GEO readiness
+    "ai_crawler_blocked": ("ai-geo", "SEO Technical", "needs-approval"),
+    "no_llms_txt": ("ai-geo", "SEO On-page", "needs-approval"),
+    "no_entity_schema": ("ai-geo", "SEO Technical", "needs-approval"),
+    "geo_unstructured": ("ai-geo", "SEO On-page", "needs-approval"),
+    # Local SEO
+    "no_localbusiness_schema": ("local", "SEO Technical", "needs-approval"),
+    "nap_missing": ("local", "Website Agent", "needs-approval"),
+    # Content / E-E-A-T (Claude analyzer, phase 2)
+    "eeat_weak": ("content", "Content Corrector", "needs-approval"),
+    "content_shallow": ("content", "Content Writer", "needs-approval"),
+    "content_stale": ("content", "Content Corrector", "needs-approval"),
+    # Performance (PageSpeed analyzer, phase 2)
+    "cwv_poor": ("performance", "Website Agent", "needs-human"),
 }
 
 _DEFAULT = ("uncategorized", "Website Agent", "needs-approval")

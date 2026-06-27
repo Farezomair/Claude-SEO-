@@ -27,6 +27,13 @@ WANTED_COLUMNS = {
         "findings_count": "INTEGER",
         "fixes_count": "INTEGER",
     },
+    # Scored audit (rebuilt auditor).
+    "audits": {
+        "health_score": "INTEGER",
+        "grade": "VARCHAR(2)",
+        "category_scores": "TEXT",
+        "roadmap": "TEXT",
+    },
 }
 
 

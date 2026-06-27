@@ -209,6 +209,36 @@
     .cc-stat { display:flex; gap:30px; margin-top:20px; }
     .cc-stat .n { font-family:'Space Grotesk',sans-serif; font-size:26px; font-weight:700; line-height:1; }
     .cc-stat .l { font-size:11px; color:var(--muted-2); text-transform:uppercase; letter-spacing:.06em; margin-top:5px; }
+
+    /* ── Health score ── */
+    .score-ring { width:118px; height:118px; border-radius:50%; flex-shrink:0; --ring:var(--accent);
+      display:flex; flex-direction:column; align-items:center; justify-content:center; position:relative;
+      background: conic-gradient(var(--ring) calc(var(--p,0)*1%), rgba(255,255,255,.07) 0); }
+    .score-ring::before { content:''; position:absolute; inset:9px; border-radius:50%; background:var(--panel-solid); }
+    .score-num { position:relative; z-index:1; font-family:'Space Grotesk',sans-serif; font-size:36px; font-weight:700; line-height:1; }
+    .score-lbl { position:relative; z-index:1; font-size:11px; color:var(--muted-2); margin-top:2px; }
+    .grade-chip { display:inline-flex; align-items:center; justify-content:center; min-width:30px; height:30px; padding:0 9px;
+      border-radius:9px; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:16px; color:#04201c; }
+    .grade-A,.grade-A.score-ring{--ring:#34d399} .grade-A.grade-chip{background:#34d399}
+    .grade-B,.grade-B.score-ring{--ring:#4ade80} .grade-B.grade-chip{background:#4ade80}
+    .grade-C,.grade-C.score-ring{--ring:#fbbf24} .grade-C.grade-chip{background:#fbbf24;color:#3a2c05}
+    .grade-D,.grade-D.score-ring{--ring:#fb923c} .grade-D.grade-chip{background:#fb923c;color:#3a1c05}
+    .grade-F,.grade-F.score-ring{--ring:#fb7185} .grade-F.grade-chip{background:#fb7185;color:#3a0512}
+    .cat-bars { margin-top:12px; display:flex; flex-direction:column; gap:7px; }
+    .cat-row { display:grid; grid-template-columns:140px 1fr 30px; align-items:center; gap:10px; font-size:12.5px; }
+    @media (max-width:520px){ .cat-row{ grid-template-columns:110px 1fr 28px; } }
+    .cat-name { color:var(--muted); }
+    .cat-track { height:7px; background:rgba(255,255,255,.07); border-radius:5px; overflow:hidden; }
+    .cat-track > i { display:block; height:100%; background:var(--accent-grad); border-radius:5px; }
+    .cat-score { text-align:right; font-weight:700; font-variant-numeric:tabular-nums; }
+    .prio-list { list-style:none; padding:0; margin:8px 0 0; display:flex; flex-direction:column; gap:8px; }
+    .prio-item { display:flex; gap:11px; align-items:flex-start; padding:10px 12px; background:var(--panel-2); border:1px solid var(--border-soft); border-radius:10px; }
+    .prio-sev { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; padding:2px 7px; border-radius:6px; flex-shrink:0; margin-top:1px; }
+    .sev-high,.sev-critical,.sev-blocker { background:rgba(251,113,133,.15); color:#fb7185; }
+    .sev-medium { background:rgba(251,191,36,.15); color:#fbbf24; }
+    .sev-low { background:rgba(153,162,181,.14); color:#aab2c2; }
+    .prio-body { font-size:13px; }
+    .prio-meta { font-size:11.5px; color:var(--muted-2); margin-top:2px; }
   </style>
 </head>
 <body>

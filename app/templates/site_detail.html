@@ -73,6 +73,44 @@
       </aside>
 
       <div>
+        {% if audit_score is not none %}
+        <div class="card">
+          <div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap;">
+            <div class="score-ring grade-{{ audit_grade }}" style="--p:{{ audit_score }};">
+              <div class="score-num">{{ audit_score }}</div>
+              <div class="score-lbl">/ 100</div>
+            </div>
+            <div style="flex:1; min-width:240px;">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <h2 style="margin:0;">SEO Health</h2>
+                <span class="grade-chip grade-{{ audit_grade }}">{{ audit_grade }}</span>
+              </div>
+              <div class="cat-bars">
+                {% for c in audit_categories %}
+                <div class="cat-row">
+                  <span class="cat-name">{{ c.label }}</span>
+                  <span class="cat-track"><i style="width:{{ c.score }}%;"></i></span>
+                  <span class="cat-score">{{ c.score }}</span>
+                </div>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
+          {% if audit_roadmap %}
+          <h3 style="margin-top:20px;">Top priorities</h3>
+          <ul class="prio-list">
+            {% for r in audit_roadmap[:5] %}
+            <li class="prio-item">
+              <span class="prio-sev sev-{{ r.severity }}">{{ r.severity }}</span>
+              <div><div class="prio-body">{{ r.title }}</div>
+                <div class="prio-meta">{{ r.category_label }} &middot; owner: {{ r.route }}</div></div>
+            </li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+        </div>
+        {% endif %}
+
         <div class="card">
           <div class="cc-hero">
             <div>
@@ -214,7 +252,46 @@
           </form>
         </div>
       {% endif %}
+      {% if audit_categories %}
+        <div class="card">
+          <div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap;">
+            <div class="score-ring grade-{{ latest_audit.grade }}" style="--p:{{ latest_audit.health_score }};">
+              <div class="score-num">{{ latest_audit.health_score }}</div>
+              <div class="score-lbl">/ 100</div>
+            </div>
+            <div style="flex:1; min-width:240px;">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <h2 style="margin:0;">SEO Health by category</h2>
+                <span class="grade-chip grade-{{ latest_audit.grade }}">{{ latest_audit.grade }}</span>
+              </div>
+              <div class="cat-bars">
+                {% for c in audit_categories %}
+                <div class="cat-row">
+                  <span class="cat-name">{{ c.label }} <span class="muted" style="font-size:11px;">({{ c.count }})</span></span>
+                  <span class="cat-track"><i style="width:{{ c.score }}%;"></i></span>
+                  <span class="cat-score">{{ c.score }}</span>
+                </div>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
+          {% if audit_roadmap %}
+          <h3 style="margin-top:20px;">Prioritized fix plan</h3>
+          <ul class="prio-list">
+            {% for r in audit_roadmap %}
+            <li class="prio-item">
+              <span class="prio-sev sev-{{ r.severity }}">{{ r.severity }}</span>
+              <div><div class="prio-body">{{ r.title }}</div>
+                <div class="prio-meta">{{ r.category_label }} &middot; owner: {{ r.route }}</div></div>
+            </li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+        </div>
+      {% endif %}
+
       {% if findings %}
+        <h3 style="margin-top:24px;">All findings</h3>
         <div class="card" style="padding:0;">
           <table>
             <thead><tr><th>Severity</th><th>Finding</th><th>Owner</th><th>Action</th><th>Status</th><th>Page</th></tr></thead>

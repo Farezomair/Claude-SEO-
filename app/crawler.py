@@ -89,6 +89,38 @@ def _schema_types(data) -> set:
     return found
 
 
+AI_CRAWLERS = ["GPTBot", "OAI-SearchBot", "ChatGPT-User", "ClaudeBot", "anthropic-ai",
+               "PerplexityBot", "Google-Extended", "CCBot", "Bytespider"]
+ENTITY_SCHEMA = {"organization", "localbusiness", "website", "person", "professionalservice"}
+PHONE_RE = re.compile(r"\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}")
+
+
+def _ai_blocked(robots_txt: str) -> list[str]:
+    """Return which AI crawlers are disallowed from the whole site in robots.txt."""
+    blocked: set[str] = set()
+    for block in re.split(r"\n\s*\n", robots_txt or ""):
+        agents = [m.strip().lower() for m in re.findall(r"(?im)^user-agent:\s*(.+)$", block)]
+        disallows = [m.strip() for m in re.findall(r"(?im)^disallow:\s*(.*)$", block)]
+        if "/" in disallows:
+            for bot in AI_CRAWLERS:
+                if bot.lower() in agents:
+                    blocked.add(bot)
+    return sorted(blocked)
+
+
+def _home_schema_types(home_soup) -> set:
+    types: set[str] = set()
+    if home_soup is None:
+        return types
+    for s in home_soup.find_all("script", attrs={"type": re.compile(r"ld\+json", re.I)}):
+        raw = s.string or s.get_text() or ""
+        try:
+            types |= _schema_types(json.loads(raw))
+        except Exception:
+            pass
+    return types
+
+
 def _sitemap_locs(client, text: str, depth: int = 0) -> set:
     """Collect <loc> URLs from a sitemap, following one level of sitemap index."""
     locs = re.findall(r"<loc>\s*(.*?)\s*</loc>", text, re.I | re.S)
@@ -232,6 +264,33 @@ def crawl_site(start_url: str) -> dict:
             if no_alt:
                 issues.append(_issue("images_missing_alt", "low", page_url,
                                      f"{len(no_alt)} of {len(imgs)} images missing alt text"))
+            # Images without width/height — a Core Web Vitals (CLS) risk.
+            no_dim = [i for i in imgs if not (i.get("width") and i.get("height"))]
+            if imgs and len(no_dim) >= max(3, len(imgs) // 2):
+                issues.append(_issue("image_no_dimensions", "low", page_url,
+                                     f"{len(no_dim)} of {len(imgs)} images have no width/height set (can cause layout shift / CLS)"))
+
+            # --- on-page depth (expanded battery) ---
+            md = soup.find("meta", attrs={"name": re.compile(r"^description$", re.I)})
+            if not md or not (md.get("content") or "").strip():
+                issues.append(_issue("meta_description_missing", "medium", page_url,
+                                     "No meta description — Google may show a random snippet"))
+            if title:
+                if len(title) > 65:
+                    issues.append(_issue("title_length", "low", page_url,
+                                         f"Title is long ({len(title)} chars) — likely truncated in search results"))
+                elif len(title) < 25:
+                    issues.append(_issue("title_length", "low", page_url,
+                                         f"Title is short ({len(title)} chars) — wasted SERP space"))
+            # Heading hierarchy: flag a skipped level (e.g. H2 -> H4).
+            levels = [int(h.name[1]) for h in soup.find_all(re.compile(r"^h[1-6]$"))]
+            prev = 0
+            for lvl in levels:
+                if prev and lvl > prev + 1:
+                    issues.append(_issue("heading_hierarchy", "low", page_url,
+                                         f"Heading levels skip from H{prev} to H{lvl} — breaks document outline"))
+                    break
+                prev = lvl
 
             # --- thin content (SEO Auditor group C) ---
             path = urlparse(page_url).path.lower()
@@ -333,10 +392,14 @@ def crawl_site(start_url: str) -> dict:
         # ---------------- site-wide checks ----------------
         home_soup = BeautifulSoup(homepage_html, "html.parser") if homepage_html else None
 
-        # robots.txt
+        # robots.txt (capture text for the AI-crawler check below)
+        robots_txt = ""
         try:
-            if client.get(origin + "/robots.txt").status_code >= 400:
+            rr = client.get(origin + "/robots.txt")
+            if rr.status_code >= 400:
                 issues.append(_issue("indexation", "low", origin, "No robots.txt found"))
+            else:
+                robots_txt = rr.text
         except Exception:
             pass
 
@@ -411,6 +474,36 @@ def crawl_site(start_url: str) -> dict:
                                      "Site does not redirect HTTP to HTTPS"))
         except Exception:
             pass
+
+        # --- AI / GEO readiness ---
+        blocked_ai = _ai_blocked(robots_txt)
+        if blocked_ai:
+            issues.append(_issue("ai_crawler_blocked", "medium", origin,
+                                 "robots.txt blocks AI crawlers (" + ", ".join(blocked_ai) +
+                                 ") — these pages can't be cited by AI search"))
+        try:
+            if client.get(origin + "/llms.txt").status_code >= 400:
+                issues.append(_issue("no_llms_txt", "low", origin,
+                                     "No llms.txt — the emerging standard for guiding AI assistants to your key content"))
+        except Exception:
+            pass
+
+        home_types = _home_schema_types(home_soup)
+        has_entity = bool(home_types & ENTITY_SCHEMA) or any("business" in t for t in home_types)
+        if home_soup is not None and not has_entity:
+            issues.append(_issue("no_entity_schema", "medium", origin,
+                                 "Homepage has no Organization/LocalBusiness entity schema — weakens AI and Knowledge Graph understanding of who you are"))
+
+        # --- local SEO signals ---
+        has_localbusiness = any(t == "localbusiness" or "business" in t for t in home_types)
+        if home_soup is not None and not has_localbusiness:
+            issues.append(_issue("no_localbusiness_schema", "low", origin,
+                                 "No LocalBusiness schema — important for local rankings and Google Business Profile alignment"))
+        if home_soup is not None:
+            has_tel = bool(home_soup.find("a", href=re.compile(r"^tel:", re.I)))
+            if not has_tel and not PHONE_RE.search(home_soup.get_text(" ")):
+                issues.append(_issue("nap_missing", "low", origin,
+                                     "No phone number / click-to-call found on the homepage — hurts local trust and conversions"))
 
         # duplicate titles
         seen: dict[str, list[str]] = {}

@@ -67,7 +67,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "command-center-7"
+BUILD = "scored-audit-8"
 
 
 @app.get("/version")
@@ -284,6 +284,17 @@ def site_detail(
         ctx["latest_report"] = latest_report
         ctx["weekly_running"] = bool(latest_weekly and latest_weekly.status == "running")
         ctx["connection_active"] = get_connection(site_id, site.url, site.name) is not None
+        latest_audit = (
+            db.query(Audit).filter(Audit.site_id == site_id, Audit.status == "completed")
+            .order_by(Audit.created_at.desc()).first()
+        )
+        ctx["audit_score"] = latest_audit.health_score if latest_audit else None
+        ctx["audit_grade"] = latest_audit.grade if latest_audit else None
+        try:
+            ctx["audit_categories"] = json.loads(latest_audit.category_scores) if latest_audit and latest_audit.category_scores else []
+            ctx["audit_roadmap"] = json.loads(latest_audit.roadmap) if latest_audit and latest_audit.roadmap else []
+        except Exception:
+            ctx["audit_categories"], ctx["audit_roadmap"] = [], []
 
     elif tab == "audit":
         latest_audit = (
@@ -296,6 +307,11 @@ def site_detail(
             findings = db.query(Finding).filter(Finding.audit_id == latest_audit.id).all()
             findings.sort(key=lambda f: (severity_rank.get(f.severity, 5), f.category))
             ctx["findings"] = findings
+            try:
+                ctx["audit_categories"] = json.loads(latest_audit.category_scores) if latest_audit.category_scores else []
+                ctx["audit_roadmap"] = json.loads(latest_audit.roadmap) if latest_audit.roadmap else []
+            except Exception:
+                ctx["audit_categories"], ctx["audit_roadmap"] = [], []
             # Phase C: how many missing-page findings the Website Agent can draft.
             ctx["draftable_pages"] = sum(1 for f in findings if f.category == "required_page_missing")
             ctx["page_draft_running"] = (

@@ -46,6 +46,12 @@ class Audit(Base):
     site_id = Column(Integer, ForeignKey("sites.id", ondelete="CASCADE"), nullable=False)
     status = Column(String(50), default="pending")
     summary = Column(Text, default="")
+    # Scored audit (the rebuilt auditor): overall 0-100 + letter grade, plus JSON
+    # of per-category scores and the prioritized fix plan.
+    health_score = Column(Integer, nullable=True)
+    grade = Column(String(2), nullable=True)
+    category_scores = Column(Text, nullable=True)   # JSON list
+    roadmap = Column(Text, nullable=True)           # JSON list
     created_at = Column(DateTime, default=utcnow)
 
     site = relationship("Site", back_populates="audits")

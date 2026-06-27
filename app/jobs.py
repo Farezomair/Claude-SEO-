@@ -5,6 +5,7 @@ blocking the web request. The thread opens its own database session (request
 sessions can't cross thread boundaries) and writes the findings + a run-log
 entry when it finishes.
 """
+import json
 import threading
 
 from .crawler import crawl_site
@@ -12,6 +13,7 @@ from .database import SessionLocal
 from .gsc import gsc_findings
 from .models import Audit, Finding, RunLog
 from .routing import classify
+from .scoring import compute as compute_score
 
 
 def _run_audit(site_id: int, audit_id: int, start_url: str) -> None:
@@ -48,11 +50,19 @@ def _run_audit(site_id: int, audit_id: int, start_url: str) -> None:
                 evidence_url=iss["url"], detection_source=iss.get("detection_source", "crawl"),
                 status="open",
             ))
+        # Score the audit (the rebuilt auditor: graded + prioritized, not a flat list).
+        scored = compute_score(all_issues)
+        audit.health_score = scored["overall"]
+        audit.grade = scored["grade"]
+        audit.category_scores = json.dumps(scored["categories"])
+        audit.roadmap = json.dumps(scored["roadmap"])
+
         s = result["stats"]
         audit.status = "completed"
         audit.summary = (
+            f"Health {scored['overall']}/100 ({scored['grade']}). "
             f"Crawled {s['pages_crawled']} pages, checked {s['links_checked']} links, "
-            f"found {s['issues_found']} issue(s)."
+            f"found {len(all_issues)} issue(s)."
         )
         db.add(RunLog(site_id=site_id, message=f"Audit #{audit_id} completed — {audit.summary}"))
         db.commit()
