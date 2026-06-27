@@ -34,7 +34,7 @@ from .rules import get_rules, set_rules
 from .scheduler import ENABLED as SCHEDULER_ENABLED
 from .scheduler import INTERVAL_DAYS, is_due, start_scheduler
 from .onpage_agent import start_meta_rewrites_async
-from .seo_technical import start_metafix_async
+from .seo_technical import start_dedupe_async, start_metafix_async
 from .website_agent import start_change_async, start_page_drafts_async
 from .weekly import start_weekly_async
 from .wordpress import YOAST_DESC_KEY, YOAST_TITLE_KEY, WordPressClient, WordPressError
@@ -235,6 +235,13 @@ def site_detail(
             ctx["onpage_running"] = (
                 db.query(JobRun).filter(
                     JobRun.site_id == site_id, JobRun.kind == "onpage", JobRun.status == "running"
+                ).first() is not None
+            )
+            # Duplicate-title findings SEO Technical can make unique.
+            ctx["dup_titles"] = sum(1 for f in findings if f.category == "duplicate_title")
+            ctx["dedupe_running"] = (
+                db.query(JobRun).filter(
+                    JobRun.site_id == site_id, JobRun.kind == "dedupe", JobRun.status == "running"
                 ).first() is not None
             )
 
@@ -491,6 +498,31 @@ def correct_content_route(site_id: int, request: Request, db: Session = Depends(
         db.refresh(run)
         start_correction_async(site_id, run.id, conn)
     return RedirectResponse(f"/sites/{site_id}?tab=content", status_code=303)
+
+
+@app.post("/sites/{site_id}/fix-duplicate-titles")
+def fix_duplicate_titles(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """SEO Technical: make duplicate page titles unique."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return RedirectResponse(f"/sites/{site_id}?tab=settings&notice=test_none", status_code=303)
+    already = (
+        db.query(JobRun)
+        .filter(JobRun.site_id == site_id, JobRun.kind == "dedupe", JobRun.status == "running")
+        .first()
+    )
+    if not already:
+        run = JobRun(site_id=site_id, kind="dedupe", status="running", summary="De-duplicating titles…")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        start_dedupe_async(site_id, run.id, conn)
+    return RedirectResponse(f"/sites/{site_id}?tab=audit", status_code=303)
 
 
 @app.post("/sites/{site_id}/improve-rankings")

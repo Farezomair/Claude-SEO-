@@ -10,6 +10,9 @@
   {% if tab == 'audit' and onpage_running %}
   <meta http-equiv="refresh" content="6">
   {% endif %}
+  {% if tab == 'audit' and dedupe_running %}
+  <meta http-equiv="refresh" content="6">
+  {% endif %}
   {% if tab == 'fixes' and latest_fix_run and latest_fix_run.status == 'running' %}
   <meta http-equiv="refresh" content="6">
   {% endif %}
@@ -82,6 +85,16 @@
           <form method="post" action="/sites/{{ site.id }}/improve-rankings">
             <button class="btn small" type="submit" {{ 'disabled' if onpage_running else '' }}>
               {{ 'Working…' if onpage_running else 'Improve ranking pages' }}
+            </button>
+          </form>
+        </div>
+      {% endif %}
+      {% if dup_titles and page_connection_active %}
+        <div class="card row-between">
+          <div>SEO Technical can make <strong>{{ dup_titles }} duplicate title(s)</strong> unique.</div>
+          <form method="post" action="/sites/{{ site.id }}/fix-duplicate-titles">
+            <button class="btn small" type="submit" {{ 'disabled' if dedupe_running else '' }}>
+              {{ 'Working…' if dedupe_running else 'Fix duplicate titles' }}
             </button>
           </form>
         </div>

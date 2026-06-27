@@ -14,9 +14,11 @@ verify-before-done QC step. Safe, reversible changes only — no approval gate.
 """
 import threading
 
+import json
+
 from .brain import generate_meta
 from .database import SessionLocal
-from .models import Finding, FixRecord, JobRun, RunLog
+from .models import Approval, Finding, FixRecord, JobRun, RunLog, Site
 from .routing import classify
 from .rules import rules_for
 from .wordpress import YOAST_DESC_KEY, YOAST_TITLE_KEY, WordPressClient, WordPressError
@@ -173,3 +175,96 @@ def start_metafix_async(site_id: int, run_id: int, conn: dict) -> None:
     threading.Thread(
         target=run_metafix, args=(site_id, run_id, conn), daemon=True
     ).start()
+
+
+MAX_DEDUPE = 10
+
+
+def run_dedupe_titles(site_id: int, run_id: int, conn: dict) -> None:
+    """Make duplicate page titles unique. Keeps one page per duplicated title and
+    drafts a fresh, content-specific title for the rest, gated for approval."""
+    db = SessionLocal()
+    try:
+        run = db.get(JobRun, run_id)
+        site = db.get(Site, site_id)
+        wp = WordPressClient(conn["url"], conn["username"], conn["app_password"])
+        ok, code = wp.test()
+        if not ok:
+            run.status = "failed"
+            run.summary = f"WordPress connection failed (HTTP {code})."
+            db.commit()
+            return
+
+        items = wp.list_content(limit=60)
+        groups: dict[str, list] = {}
+        for it in items:
+            t = (it.get("title") or "").strip().lower()
+            if t:
+                groups.setdefault(t, []).append(it)
+        dups = {t: lst for t, lst in groups.items() if len(lst) > 1}
+        if not dups:
+            run.status = "completed"
+            run.summary = "No duplicate titles found."
+            db.commit()
+            return
+
+        open_findings = (
+            db.query(Finding)
+            .filter(Finding.site_id == site_id, Finding.category == "duplicate_title",
+                    Finding.status == "open")
+            .all()
+        )
+        rules = rules_for("shared", "seo_technical")
+        drafted = 0
+        for _t, lst in dups.items():
+            if drafted >= MAX_DEDUPE:
+                break
+            orig_title = lst[0].get("title") or ""
+            finding = next((f for f in open_findings if orig_title and orig_title[:40].lower() in (f.issue or "").lower()), None)
+            # Keep lst[0] as-is; rewrite the others to be unique.
+            for it in lst[1:]:
+                if drafted >= MAX_DEDUPE:
+                    break
+                old_title = (it["meta"].get(YOAST_TITLE_KEY) or it.get("title") or "").strip()
+                try:
+                    s = generate_meta(it["title"], it["link"], it["content_text"],
+                                      conn.get("site_name", ""), rules=rules)
+                except Exception:
+                    continue
+                new_title = s.get("title", "")
+                if not new_title or new_title.strip().lower() == old_title.lower():
+                    continue
+                db.add(Approval(
+                    site_id=site_id, kind="meta_rewrite",
+                    title=f"Make title unique: {it['link']}",
+                    summary=f"Duplicate title. “{old_title}” → “{new_title}”.",
+                    payload=json.dumps({
+                        "finding_id": finding.id if finding else None,
+                        "page_kind": it["kind"], "page_id": it["id"],
+                        "new_title": new_title, "new_desc": "",
+                        "old_title": old_title, "old_desc": "",
+                    }),
+                    status="pending",
+                ))
+                drafted += 1
+            if finding:
+                finding.status = "in-progress"
+            db.commit()
+
+        run.status = "completed"
+        run.summary = (f"Drafted {drafted} unique title(s) — waiting for approval."
+                       if drafted else "Duplicate titles found but no rewrite was needed.")
+        db.add(RunLog(site_id=site_id, message=run.summary))
+        db.commit()
+    except Exception as exc:
+        run = db.get(JobRun, run_id)
+        if run:
+            run.status = "failed"
+            run.summary = f"Run failed: {exc.__class__.__name__}: {exc}"
+            db.commit()
+    finally:
+        db.close()
+
+
+def start_dedupe_async(site_id: int, run_id: int, conn: dict) -> None:
+    threading.Thread(target=run_dedupe_titles, args=(site_id, run_id, conn), daemon=True).start()
