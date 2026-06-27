@@ -21,6 +21,12 @@ WANTED_COLUMNS = {
         "target_page_id": "INTEGER",
         "target_widget_id": "VARCHAR(100)",
     },
+    # Live pipeline progress for the Command Center.
+    "job_runs": {
+        "phase": "VARCHAR(30)",
+        "findings_count": "INTEGER",
+        "fixes_count": "INTEGER",
+    },
 }
 
 

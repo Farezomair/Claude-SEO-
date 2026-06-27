@@ -39,6 +39,7 @@
   <p class="muted" style="margin-top:0;">{{ site.url }}</p>
 
   <nav class="tabs">
+    <a href="/sites/{{ site.id }}?tab=command"  class="{{ 'active' if tab == 'command' else '' }}">Command Center</a>
     <a href="/sites/{{ site.id }}?tab=audit"    class="{{ 'active' if tab == 'audit' else '' }}">Audit</a>
     <a href="/sites/{{ site.id }}?tab=fixes"     class="{{ 'active' if tab == 'fixes' else '' }}">Fixes</a>
     <a href="/sites/{{ site.id }}?tab=content"   class="{{ 'active' if tab == 'content' else '' }}">Content</a>
@@ -47,7 +48,118 @@
     <a href="/sites/{{ site.id }}?tab=settings"  class="{{ 'active' if tab == 'settings' else '' }}">Settings</a>
   </nav>
 
-  {% if tab == 'audit' %}
+  {% if tab == 'command' %}
+    {% set labels = {'audit':['🔍','Audit','Scanning the site'], 'route':['🧭','Route','Assigning to doers'], 'fix':['🛠️','Fix','Applying changes'], 'report':['📊','Report','Compiling results']} %}
+    <div class="cc-grid">
+      <aside class="cc-side">
+        <div class="card" style="padding:16px;">
+          <div class="crew-group">
+            <p class="crew-h">Auditors</p>
+            <div class="crew-item" data-group="audit"><span class="dot"></span><div><div class="nm">Website Auditor</div><div class="role">Crawl &amp; on-page scan</div></div></div>
+            <div class="crew-item" data-group="audit"><span class="dot"></span><div><div class="nm">Search Console Auditor</div><div class="role">Ranking &amp; CTR signals</div></div></div>
+          </div>
+          <div class="crew-group">
+            <p class="crew-h">Doers</p>
+            <div class="crew-item" data-group="fix"><span class="dot"></span><div><div class="nm">SEO Technical</div><div class="role">Titles &amp; meta</div></div></div>
+            <div class="crew-item" data-group="fix"><span class="dot"></span><div><div class="nm">SEO On-page</div><div class="role">Rankings &amp; page rewrites</div></div></div>
+            <div class="crew-item" data-group="fix"><span class="dot"></span><div><div class="nm">Website Agent</div><div class="role">CSS &amp; missing pages</div></div></div>
+            <div class="crew-item" data-group="fix"><span class="dot"></span><div><div class="nm">Content Team</div><div class="role">Drafts &amp; cleanups</div></div></div>
+          </div>
+          <div class="crew-group">
+            <p class="crew-h">Reports</p>
+            <div class="crew-item" data-group="report"><span class="dot"></span><div><div class="nm">Report Generator</div><div class="role">Weekly before/after</div></div></div>
+          </div>
+        </div>
+      </aside>
+
+      <div>
+        <div class="card">
+          <div class="cc-hero">
+            <div>
+              <h2 style="margin:0;">Pipeline</h2>
+              <p class="muted" id="cc-summary" style="margin:3px 0 0; font-size:13px;">{{ pipeline.summary or 'Idle — start a run to audit the site, apply fixes, and compile a report.' }}</p>
+            </div>
+            <div style="display:flex; gap:10px; align-items:center;">
+              <form method="post" action="/sites/{{ site.id }}/run-weekly">
+                <button class="btn" id="cc-run" type="submit" {{ 'disabled' if weekly_running else '' }}>{{ 'Crew working…' if weekly_running else '▶ Start full run' }}</button>
+              </form>
+              <a class="btn secondary" id="cc-viewreport" href="/sites/{{ site.id }}?tab=reports" {{ '' if latest_report else 'style=display:none;' }}>View report</a>
+            </div>
+          </div>
+
+          <div class="pipeline" id="cc-pipeline">
+            {% for s in pipeline.stages %}
+            <div class="stage {{ s.state }}" data-stage="{{ s.key }}">
+              <span class="st-state" data-role="state">{{ {'pending':'Waiting','active':'Working','done':'Done','failed':'Failed'}[s.state] }}</span>
+              <div class="ico">{{ labels[s.key][0] }}</div>
+              <div class="st-title">{{ labels[s.key][1] }}</div>
+              <div class="st-sub">{{ labels[s.key][2] }}</div>
+              <div class="bar"><i></i></div>
+            </div>
+            {% endfor %}
+          </div>
+
+          <div class="cc-stat">
+            <div><div class="n" id="cc-findings">{{ pipeline.findings if pipeline.findings is not none else '—' }}</div><div class="l">Findings</div></div>
+            <div><div class="n" id="cc-fixes">{{ pipeline.fixes if pipeline.fixes is not none else '—' }}</div><div class="l">Fixes applied</div></div>
+          </div>
+        </div>
+
+        {% if not connection_active %}
+          <div class="notice notice-muted">Tip: connect WordPress in <a href="/sites/{{ site.id }}?tab=settings">Settings</a> so the crew can <strong>apply</strong> fixes, not just detect them.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        var STATE_LABEL = {pending:'Waiting', active:'Working', done:'Done', failed:'Failed'};
+        var GROUP_FOR_PHASE = {audit:'audit', route:'audit', fix:'fix', report:'report'};
+        var url = "/sites/{{ site.id }}/pipeline-status";
+        var timer = null;
+
+        function render(d) {
+          (d.stages || []).forEach(function (s) {
+            var el = document.querySelector('.stage[data-stage="' + s.key + '"]');
+            if (!el) return;
+            el.className = 'stage ' + s.state;
+            var lab = el.querySelector('[data-role=state]');
+            if (lab) lab.textContent = STATE_LABEL[s.state] || '';
+          });
+          var f = document.getElementById('cc-findings');
+          var x = document.getElementById('cc-fixes');
+          if (f) f.textContent = (d.findings === null || d.findings === undefined) ? '—' : d.findings;
+          if (x) x.textContent = (d.fixes === null || d.fixes === undefined) ? '—' : d.fixes;
+          var sm = document.getElementById('cc-summary');
+          if (sm && d.summary) sm.textContent = d.summary;
+
+          var grp = d.running ? GROUP_FOR_PHASE[d.phase] : null;
+          document.querySelectorAll('.crew-item').forEach(function (c) {
+            c.classList.toggle('working', !!grp && c.getAttribute('data-group') === grp);
+            c.classList.toggle('done', !d.running && d.status === 'completed');
+          });
+
+          var run = document.getElementById('cc-run');
+          if (run) { run.disabled = d.running; run.textContent = d.running ? 'Crew working…' : '▶ Start full run'; }
+          var vr = document.getElementById('cc-viewreport');
+          if (vr && d.report_id) vr.style.display = '';
+        }
+
+        function poll() {
+          fetch(url, {headers: {'Accept': 'application/json'}})
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              render(d);
+              if (!d.running && timer) { clearInterval(timer); timer = null; }
+            })
+            .catch(function () {});
+        }
+        poll();
+        timer = setInterval(poll, 1500);
+      })();
+    </script>
+
+  {% elif tab == 'audit' %}
     {% set running = latest_audit and latest_audit.status == 'running' %}
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
       <div>
@@ -282,6 +394,32 @@
       <div class="empty">Weekly run in progress (audit → fixes → report) — this page refreshes automatically.</div>
     {% elif latest_weekly_run and latest_weekly_run.status == 'failed' %}
       <div class="card"><div class="error">{{ latest_weekly_run.summary }}</div></div>
+    {% endif %}
+
+    {% if changes %}
+      <div class="card">
+        <h2>What changed — before &amp; after</h2>
+        <p class="muted" style="margin-top:-6px;">The most recent live changes the crew applied, with the old value and the new value.</p>
+        {% for c in changes %}
+        <div style="border-top:1px solid var(--border-soft); padding:14px 0;">
+          <div class="row-between" style="margin-bottom:8px;">
+            <strong>{{ c.doer }}</strong>
+            <span class="muted" style="font-size:12px;">{{ c.field }}{% if c.page_ref %} &middot; {{ c.page_ref }}{% endif %} {% if c.verdict %}&middot; {{ c.verdict | badge }}{% endif %}</span>
+          </div>
+          {% if c.is_page %}
+            <pre style="border:1px solid var(--border); border-radius:8px; padding:14px; max-height:280px; overflow:auto; background:#0f1219; font-size:12.5px; white-space:pre-wrap; line-height:1.5; margin:0;">{% for kind, line in c.diff %}{% if kind == 'add' %}<span style="color:#4ade80;">+ {{ line }}</span>
+{% elif kind == 'del' %}<span style="color:#f87171;">- {{ line }}</span>
+{% endif %}{% endfor %}</pre>
+          {% else %}
+            <div style="display:grid; grid-template-columns:1fr auto 1fr; gap:12px; align-items:center;">
+              <div style="background:rgba(251,113,133,.08); border:1px solid rgba(251,113,133,.25); border-radius:8px; padding:10px 12px; font-size:13px; color:#fda4af;">{{ c.before or '(was empty)' }}</div>
+              <div class="muted" style="font-size:18px;">→</div>
+              <div style="background:rgba(52,211,153,.08); border:1px solid rgba(52,211,153,.25); border-radius:8px; padding:10px 12px; font-size:13px; color:#6ee7b7;">{{ c.after }}</div>
+            </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
     {% endif %}
 
     {% if reports %}

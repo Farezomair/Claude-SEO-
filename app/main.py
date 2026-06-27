@@ -67,7 +67,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "elementor-polish-6"
+BUILD = "command-center-7"
 
 
 @app.get("/version")
@@ -181,11 +181,61 @@ def add_site(
     return RedirectResponse("/sites", status_code=303)
 
 
+_PIPELINE_STAGES = ["audit", "route", "fix", "report"]
+_PHASE_ORDER = {"audit": 0, "route": 1, "fix": 2, "report": 3, "done": 4}
+
+
+def _pipeline_state(run, report_id=None) -> dict:
+    """Map a weekly/Conductor JobRun to per-stage states for the Command Center."""
+    status = run.status if run else "idle"
+    phase = run.phase if run else None
+    running = status == "running"
+    cur = _PHASE_ORDER.get(phase, -1)
+    stages = []
+    for i, name in enumerate(_PIPELINE_STAGES):
+        if status == "failed" and i == cur:
+            state = "failed"
+        elif status == "completed" or phase == "done" or cur > i:
+            state = "done"
+        elif cur == i and running:
+            state = "active"
+        else:
+            state = "pending"
+        stages.append({"key": name, "state": state})
+    return {
+        "running": running,
+        "status": status,
+        "phase": phase,
+        "stages": stages,
+        "findings": run.findings_count if run else None,
+        "fixes": run.fixes_count if run else None,
+        "summary": run.summary if run else "",
+        "run_id": run.id if run else None,
+        "report_id": report_id,
+    }
+
+
+@app.get("/sites/{site_id}/pipeline-status")
+def pipeline_status(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """Live pipeline state for the Command Center poller (JSON)."""
+    if not current_user(request):
+        return JSONResponse({"error": "auth"}, status_code=401)
+    run = (
+        db.query(JobRun).filter(JobRun.site_id == site_id, JobRun.kind == "weekly")
+        .order_by(JobRun.created_at.desc()).first()
+    )
+    report = (
+        db.query(Report).filter(Report.site_id == site_id)
+        .order_by(Report.created_at.desc()).first()
+    )
+    return JSONResponse(_pipeline_state(run, report.id if report else None))
+
+
 @app.get("/sites/{site_id}", response_class=HTMLResponse)
 def site_detail(
     site_id: int,
     request: Request,
-    tab: str = "audit",
+    tab: str = "command",
     notice: str = "",
     db: Session = Depends(get_db),
 ):
@@ -194,8 +244,8 @@ def site_detail(
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
         return RedirectResponse("/sites", status_code=303)
-    if tab not in {"audit", "fixes", "content", "website", "reports", "settings"}:
-        tab = "audit"
+    if tab not in {"command", "audit", "fixes", "content", "website", "reports", "settings"}:
+        tab = "command"
 
     ctx = {
         "request": request,
@@ -221,7 +271,21 @@ def site_detail(
         "pending_count": db.query(Approval).filter(Approval.status == "pending").count(),
     }
 
-    if tab == "audit":
+    if tab == "command":
+        latest_weekly = (
+            db.query(JobRun).filter(JobRun.site_id == site_id, JobRun.kind == "weekly")
+            .order_by(JobRun.created_at.desc()).first()
+        )
+        latest_report = (
+            db.query(Report).filter(Report.site_id == site_id)
+            .order_by(Report.created_at.desc()).first()
+        )
+        ctx["pipeline"] = _pipeline_state(latest_weekly, latest_report.id if latest_report else None)
+        ctx["latest_report"] = latest_report
+        ctx["weekly_running"] = bool(latest_weekly and latest_weekly.status == "running")
+        ctx["connection_active"] = get_connection(site_id, site.url, site.name) is not None
+
+    elif tab == "audit":
         latest_audit = (
             db.query(Audit).filter(Audit.site_id == site_id)
             .order_by(Audit.created_at.desc()).first()
@@ -326,6 +390,23 @@ def site_detail(
             db.query(Report).filter(Report.site_id == site_id)
             .order_by(Report.created_at.desc()).limit(20).all()
         )
+        # "What changed — before & after" feed for the report view.
+        recs = (
+            db.query(FixRecord)
+            .filter(FixRecord.site_id == site_id, FixRecord.applied == True)  # noqa: E712
+            .order_by(FixRecord.created_at.desc()).limit(15).all()
+        )
+        changes = []
+        for fr in recs:
+            is_page = fr.field == "page_html"
+            changes.append({
+                "doer": fr.doer, "field": (fr.field or "").replace("_", " "),
+                "page_ref": fr.page_ref, "when": fr.created_at,
+                "verdict": fr.verification_verdict, "is_page": is_page,
+                "before": fr.before_value or "", "after": fr.after_value or "",
+                "diff": copy_diff(fr.before_value or "", fr.after_value or "")[:40] if is_page else [],
+            })
+        ctx["changes"] = changes
 
     elif tab == "settings":
         ctx["connection"] = (
@@ -358,7 +439,7 @@ def run_weekly_now(site_id: int, request: Request, db: Session = Depends(get_db)
         db.refresh(run)
         start_weekly_async(site_id, run.id)
 
-    return RedirectResponse(f"/sites/{site_id}?tab=reports", status_code=303)
+    return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
 
 
 @app.post("/sites/{site_id}/request-change")

@@ -167,6 +167,48 @@
     .notice-muted { background: var(--panel-2); color: var(--muted); }
 
     .row-between { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap: wrap; }
+
+    /* ── Command Center ── */
+    .cc-grid { display:grid; grid-template-columns: 256px 1fr; gap:20px; align-items:start; }
+    @media (max-width: 860px){ .cc-grid{ grid-template-columns:1fr; } }
+    .cc-side { position:sticky; top:84px; }
+    @media (max-width: 860px){ .cc-side{ position:static; } }
+    .crew-group + .crew-group { margin-top:16px; padding-top:14px; border-top:1px solid var(--border-soft); }
+    .crew-h { font-size:11px; text-transform:uppercase; letter-spacing:.09em; color:var(--muted-2); font-weight:700; margin:0 0 8px; }
+    .crew-item { display:flex; align-items:center; gap:11px; padding:8px 9px; border-radius:10px; transition:background .15s; }
+    .crew-item:hover { background:var(--panel-2); }
+    .crew-item .dot { width:9px; height:9px; border-radius:50%; background:var(--muted-2); flex-shrink:0; transition:all .2s; }
+    .crew-item.working .dot { background:var(--accent); box-shadow:0 0 10px var(--accent); animation:cc-pulse 1.2s infinite; }
+    .crew-item.working { background: rgba(45,212,191,.06); }
+    .crew-item.done .dot { background:var(--success); box-shadow:0 0 8px var(--success); }
+    .crew-item .nm { font-size:13.5px; font-weight:600; line-height:1.25; }
+    .crew-item .role { font-size:11.5px; color:var(--muted-2); }
+    @keyframes cc-pulse { 0%,100%{opacity:1;} 50%{opacity:.35;} }
+
+    .cc-hero { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:20px; }
+    .pipeline { display:grid; grid-template-columns: repeat(4, 1fr); gap:14px; }
+    @media (max-width: 680px){ .pipeline{ grid-template-columns:1fr 1fr; } }
+    .stage { background:var(--panel-2); border:1px solid var(--border); border-radius:14px; padding:15px 15px 16px; position:relative; overflow:hidden; transition:border-color .25s, transform .2s, box-shadow .25s; }
+    .stage.active { border-color:rgba(45,212,191,.55); box-shadow:var(--glow); transform:translateY(-2px); }
+    .stage.done { border-color:rgba(52,211,153,.35); }
+    .stage.failed { border-color:rgba(251,113,133,.5); }
+    .stage .ico { font-size:21px; }
+    .stage .st-title { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:14px; margin-top:7px; }
+    .stage .st-sub { font-size:11.5px; color:var(--muted-2); min-height:15px; margin-top:1px; }
+    .stage .st-state { position:absolute; top:13px; right:14px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--muted-2); }
+    .stage.active .st-state { color:var(--accent); }
+    .stage.done .st-state { color:var(--success); }
+    .stage.failed .st-state { color:var(--danger); }
+    .bar { height:6px; border-radius:6px; background:rgba(255,255,255,.07); margin-top:12px; overflow:hidden; }
+    .bar > i { display:block; height:100%; width:0%; border-radius:6px; background:var(--accent-grad); transition:width .6s ease; }
+    .stage.done .bar > i { width:100%; background:linear-gradient(135deg,#34d399,#2dd4bf); }
+    .stage.active .bar > i { width:100%; background:linear-gradient(90deg, rgba(45,212,191,0) 0%, var(--accent) 50%, rgba(45,212,191,0) 100%); background-size:200% 100%; animation:cc-flow 1.1s linear infinite; }
+    .stage.failed .bar > i { width:100%; background:var(--danger); }
+    @keyframes cc-flow { 0%{background-position:200% 0;} 100%{background-position:-200% 0;} }
+
+    .cc-stat { display:flex; gap:30px; margin-top:20px; }
+    .cc-stat .n { font-family:'Space Grotesk',sans-serif; font-size:26px; font-weight:700; line-height:1; }
+    .cc-stat .l { font-size:11px; color:var(--muted-2); text-transform:uppercase; letter-spacing:.06em; margin-top:5px; }
   </style>
 </head>
 <body>

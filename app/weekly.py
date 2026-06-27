@@ -62,7 +62,16 @@ def run_weekly(site_id: int, weekly_run_id: int) -> None:
         site = db.get(Site, site_id)
         steps = []
 
+        def _phase(name, findings=None, fixes=None):
+            weekly.phase = name
+            if findings is not None:
+                weekly.findings_count = findings
+            if fixes is not None:
+                weekly.fixes_count = fixes
+            db.commit()
+
         # Phase 1 — Audit (fresh source of truth -> routed Findings).
+        _phase("audit")
         audit = Audit(site_id=site_id, status="running", summary="Weekly audit…")
         db.add(audit)
         db.commit()
@@ -71,7 +80,11 @@ def run_weekly(site_id: int, weekly_run_id: int) -> None:
         issue_count = db.query(Finding).filter(Finding.audit_id == audit.id).count()
         steps.append(f"audited ({issue_count} finding(s))")
 
+        # Phase 2 — Route (findings are already classified/owned by the auditor).
+        _phase("route", findings=issue_count)
+
         # Phase 4 — Dispatch/execute (meta fixes, only if connected).
+        _phase("fix", findings=issue_count)
         conn = get_connection(site_id, site.url, site.name)
         fixes_applied = 0
         if conn:
@@ -87,9 +100,11 @@ def run_weekly(site_id: int, weekly_run_id: int) -> None:
             steps.append("skipped fixes (no connection)")
 
         # Phase 5 — Compile (report from Findings + Fix records).
+        _phase("report", findings=issue_count, fixes=fixes_applied)
         _build_report(db, site, audit, issue_count, fixes_applied)
         steps.append("wrote report")
 
+        _phase("done", findings=issue_count, fixes=fixes_applied)
         weekly.status = "completed"
         weekly.summary = "Weekly run: " + ", ".join(steps) + "."
         db.add(RunLog(site_id=site_id, message=weekly.summary))

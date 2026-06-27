@@ -101,6 +101,10 @@ class JobRun(Base):
     kind = Column(String(50), default="metafix")     # metafix / content_draft
     status = Column(String(50), default="running")   # running/completed/failed
     summary = Column(Text, default="")
+    # Live pipeline progress for the Command Center (weekly/Conductor runs).
+    phase = Column(String(30), nullable=True)         # audit/route/fix/report/done
+    findings_count = Column(Integer, nullable=True)
+    fixes_count = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=utcnow)
 
 
