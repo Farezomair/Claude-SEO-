@@ -622,6 +622,59 @@ def discover_abilities(site_id: int, request: Request, db: Session = Depends(get
     })
 
 
+@app.get("/sites/{site_id}/elementor-probe")
+def elementor_probe(site_id: int, request: Request, page_id: int = 0,
+                    db: Session = Depends(get_db)):
+    """Build-time, READ-ONLY probe of the Elementor abilities' real JSON shapes.
+
+    Returns the raw responses for list-pages and, for the first (or given) page,
+    its structure + heading/text widgets — so the editor doer can be built
+    against the actual envelope instead of guessed shapes. Changes nothing.
+    """
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return JSONResponse({"error": "site not found"}, status_code=404)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return JSONResponse({"error": "No WordPress connection."}, status_code=400)
+    client = AbilitiesClient(conn["url"], conn["username"], conn["app_password"])
+    P = "hostinger-ai-assistant"
+    out: dict = {}
+    try:
+        out["list_pages"] = client.run(f"{P}/elementor-list-pages",
+                                       {"post_type": "page", "post_status": "publish", "limit": 20})
+    except (AbilitiesError, AbilitiesUnavailable) as exc:
+        return JSONResponse({"error": f"list-pages failed: {exc}"}, status_code=200)
+
+    # Pick a page id to inspect: the one passed in, else the first listed page.
+    if not page_id:
+        try:
+            lp = out["list_pages"]
+            # tolerate several envelope shapes
+            blob = lp.get("result", lp) if isinstance(lp, dict) else lp
+            items = (blob.get("pages") or blob.get("items") or blob.get("data")
+                     or (blob if isinstance(blob, list) else [])) if isinstance(blob, (dict, list)) else []
+            if items:
+                first = items[0]
+                page_id = first.get("id") or first.get("ID") or first.get("post_id") or 0
+        except Exception:
+            page_id = 0
+    out["picked_page_id"] = page_id
+    if page_id:
+        for label, name, payload in (
+            ("structure", f"{P}/elementor-get-page-structure", {"post_id": page_id, "include_settings": True}),
+            ("find_widgets", f"{P}/elementor-find-widgets",
+             {"post_id": page_id, "widget_types": ["heading", "text-editor", "button"], "include_settings": True}),
+        ):
+            try:
+                out[label] = client.run(name, payload)
+            except (AbilitiesError, AbilitiesUnavailable) as exc:
+                out[label] = {"error": str(exc)}
+    return JSONResponse(out)
+
+
 # --------------------------------------------------------------------------
 # Approvals (the safety gate)
 # --------------------------------------------------------------------------
