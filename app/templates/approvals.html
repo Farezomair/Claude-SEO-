@@ -37,6 +37,18 @@
           <pre style="border:1px solid var(--border); border-radius:8px; padding:16px; margin-top:12px; max-height:360px; overflow:auto; background:#0f1219; color:#cbd5e1; font-size:13px; white-space:pre-wrap;">{{ item.code }}</pre>
         </details>
       {% endif %}
+      {% if item.preview_html %}
+        <details open>
+          <summary style="cursor:pointer; color:var(--accent);">Preview rewritten page</summary>
+          <p class="muted" style="margin:8px 0 4px;">This is the new page, rendered. Scroll inside the frame to review the whole page before approving.</p>
+          <iframe srcdoc="{{ item.preview_html }}" sandbox="allow-same-origin"
+                  style="width:100%; height:520px; border:1px solid var(--border); border-radius:8px; background:#fff; margin-top:8px;"></iframe>
+        </details>
+        <details>
+          <summary style="cursor:pointer; color:var(--accent);">View HTML source</summary>
+          <pre style="border:1px solid var(--border); border-radius:8px; padding:16px; margin-top:12px; max-height:360px; overflow:auto; background:#0f1219; color:#cbd5e1; font-size:12px; white-space:pre-wrap;">{{ item.preview_html }}</pre>
+        </details>
+      {% endif %}
       <div style="display:flex; gap:8px; margin-top:16px;">
         <form method="post" action="/approvals/{{ item.approval.id }}/approve">
           <button class="btn" type="submit">Approve</button>

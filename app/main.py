@@ -36,6 +36,9 @@ from .scheduler import INTERVAL_DAYS, is_due, start_scheduler
 from .onpage_agent import start_meta_rewrites_async
 from .seo_technical import start_dedupe_async, start_metafix_async
 from .website_agent import start_change_async, start_page_drafts_async
+from .elementor_agent import (
+    apply_html, list_elementor_pages, start_page_rewrite_async, verify_html,
+)
 from .weekly import start_weekly_async
 from .wordpress import YOAST_DESC_KEY, YOAST_TITLE_KEY, WordPressClient, WordPressError
 from .abilities import AbilitiesClient, AbilitiesError, AbilitiesUnavailable
@@ -64,7 +67,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "elementor-probe-multi-3"
+BUILD = "elementor-rewrite-4"
 
 
 @app.get("/version")
@@ -293,7 +296,19 @@ def site_detail(
             db.query(SiteChange).filter(SiteChange.site_id == site_id)
             .order_by(SiteChange.created_at.desc()).limit(30).all()
         )
-        ctx["connection_active"] = get_connection(site_id, site.url, site.name) is not None
+        conn_w = get_connection(site_id, site.url, site.name)
+        ctx["connection_active"] = conn_w is not None
+        ctx["elementor_pages"] = list_elementor_pages(conn_w) if conn_w else []
+        ctx["elementor_running"] = (
+            db.query(JobRun).filter(
+                JobRun.site_id == site_id, JobRun.kind == "elementor", JobRun.status == "running"
+            ).first() is not None
+        )
+        ctx["latest_elementor_run"] = (
+            db.query(JobRun)
+            .filter(JobRun.site_id == site_id, JobRun.kind == "elementor")
+            .order_by(JobRun.created_at.desc()).first()
+        )
 
     elif tab == "reports":
         ctx["latest_weekly_run"] = (
@@ -379,11 +394,15 @@ def revert_change(site_id: int, change_id: int, request: Request, db: Session = 
     conn = get_connection(site_id, site.url, site.name)
     if conn:
         try:
-            WordPressClient(conn["url"], conn["username"], conn["app_password"]).update_custom_css(change.old_css)
+            if change.kind == "page_rewrite":
+                client = AbilitiesClient(conn["url"], conn["username"], conn["app_password"])
+                apply_html(client, change.target_page_id, change.target_widget_id, change.old_css)
+            else:
+                WordPressClient(conn["url"], conn["username"], conn["app_password"]).update_custom_css(change.old_css)
             change.status = "reverted"
-            db.add(RunLog(site_id=site_id, message=f"Reverted website change: {change.request[:80]}"))
+            db.add(RunLog(site_id=site_id, message=f"Reverted change: {change.request[:80]}"))
             db.commit()
-        except WordPressError:
+        except (WordPressError, AbilitiesError, AbilitiesUnavailable):
             return RedirectResponse(f"/sites/{site_id}?tab=website&notice=revert_fail", status_code=303)
     return RedirectResponse(f"/sites/{site_id}?tab=website&notice=reverted", status_code=303)
 
@@ -630,6 +649,33 @@ def discover_abilities(site_id: int, request: Request, db: Session = Depends(get
     })
 
 
+@app.post("/sites/{site_id}/rewrite-page")
+def rewrite_page(site_id: int, request: Request, page_id: int = Form(...),
+                 page_title: str = Form(""), db: Session = Depends(get_db)):
+    """Elementor On-page: full-page SEO rewrite of one Elementor page (gated)."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return RedirectResponse(f"/sites/{site_id}?tab=settings&notice=test_none", status_code=303)
+    already = (
+        db.query(JobRun)
+        .filter(JobRun.site_id == site_id, JobRun.kind == "elementor", JobRun.status == "running")
+        .first()
+    )
+    if not already:
+        run = JobRun(site_id=site_id, kind="elementor", status="running",
+                     summary=f"Rewriting “{page_title or page_id}”…")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        start_page_rewrite_async(site_id, run.id, conn, page_id, page_title)
+    return RedirectResponse(f"/sites/{site_id}?tab=website", status_code=303)
+
+
 @app.get("/sites/{site_id}/elementor-probe")
 def elementor_probe(site_id: int, request: Request, page_id: int = 0,
                     db: Session = Depends(get_db)):
@@ -694,7 +740,7 @@ def approvals(request: Request, notice: str = "", db: Session = Depends(get_db))
     )
     items = []
     for appr, site in pending:
-        body, code = "", ""
+        body, code, preview_html = "", "", ""
         try:
             payload = json.loads(appr.payload or "{}")
         except Exception:
@@ -705,7 +751,11 @@ def approvals(request: Request, notice: str = "", db: Session = Depends(get_db))
         elif appr.kind == "website_css":
             change = db.get(SiteChange, payload.get("change_id")) if payload.get("change_id") else None
             code = change.css if change else ""
-        items.append({"approval": appr, "site": site, "body": body, "code": code})
+        elif appr.kind == "page_rewrite":
+            change = db.get(SiteChange, payload.get("change_id")) if payload.get("change_id") else None
+            preview_html = change.css if change else ""
+        items.append({"approval": appr, "site": site, "body": body, "code": code,
+                      "preview_html": preview_html})
     return templates.TemplateResponse(
         "approvals.html",
         {"request": request, "user": current_user(request), "items": items, "notice": notice,
@@ -846,6 +896,38 @@ def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
         change.status = "applied"
         db.add(RunLog(site_id=site.id, message=f"Applied website change: {change.request[:80]}"))
 
+    elif appr.kind == "page_rewrite":
+        payload = json.loads(appr.payload or "{}")
+        change = db.get(SiteChange, payload.get("change_id"))
+        conn = get_connection(site.id, site.url, site.name)
+        if not conn or not change:
+            return RedirectResponse("/approvals?notice=no_connection", status_code=303)
+        page_id = change.target_page_id or payload.get("page_id")
+        widget_id = change.target_widget_id or payload.get("widget_id")
+        client = AbilitiesClient(conn["url"], conn["username"], conn["app_password"])
+        try:
+            method = apply_html(client, page_id, widget_id, change.css)
+        except (AbilitiesError, AbilitiesUnavailable) as exc:
+            change.status = "failed"
+            db.add(RunLog(site_id=site.id, message=f"Page rewrite failed for “{appr.title}”: {exc}"))
+            db.commit()
+            return RedirectResponse("/approvals?notice=publish_fail", status_code=303)
+        verified = verify_html(client, page_id, change.css)
+        change.status = "applied"
+        db.add(FixRecord(
+            site_id=site.id, doer="Elementor On-page",
+            action_taken=f"Full-page SEO rewrite of “{appr.title}” (via {method})",
+            page_ref=str(page_id), field="page_html",
+            before_value=(change.old_css or "")[:5000], after_value=(change.css or "")[:5000],
+            method="gate-approved", lane="gated", applied=True,
+            verification_verdict="verified" if verified else "not_fixed",
+            status="done", outcome_pending=True,
+        ))
+        db.add(RunLog(
+            site_id=site.id,
+            message=f"Applied SEO page rewrite: {appr.title} ({'verified live' if verified else 'apply ok, verify pending'})",
+        ))
+
     appr.status = "approved"
     appr.decided_at = utcnow()
     db.commit()
@@ -875,7 +957,7 @@ def reject(approval_id: int, request: Request, db: Session = Depends(get_db)):
         finding = db.get(Finding, payload.get("finding_id")) if payload.get("finding_id") else None
         if finding:
             finding.status = "open"
-    elif appr.kind == "website_css":
+    elif appr.kind in ("website_css", "page_rewrite"):
         change = db.get(SiteChange, payload.get("change_id")) if payload.get("change_id") else None
         if change:
             change.status = "rejected"

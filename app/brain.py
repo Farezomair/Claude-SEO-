@@ -252,6 +252,66 @@ Keep the same HTML tags and structure. Respond with ONLY a JSON object, no pream
     return {"body_html": str(data.get("body_html", "")).strip()}
 
 
+def _strip_fences(text: str) -> str:
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text)
+    return text.strip()
+
+
+def rewrite_page_html(site_name: str, page_url: str, page_title: str,
+                      current_html: str, rules: str = "") -> dict:
+    """Full-page SEO rewrite of a single Elementor HTML-widget page body.
+
+    These pages are one self-contained HTML document (fonts, <style>, nav, hero,
+    sections, FAQ, footer, <script>). We improve the visible copy for search
+    intent while preserving the entire structure, styling, and scripts verbatim.
+
+    Returns {"html": full_rewritten_html, "summary": short_plain_summary}.
+    """
+    prompt = f"""You are an expert SEO web copywriter and front-end developer improving ONE complete web page for a local business. You will receive the page's full HTML and return the COMPLETE improved HTML.{_rules_block(rules)}
+
+Business: {site_name}
+Page: {page_title} ({page_url})
+
+ABSOLUTE PRESERVATION RULES (breaking any of these breaks the live page):
+- Keep the ENTIRE <style>...</style> block(s) byte-for-byte unchanged.
+- Keep ALL <script>...</script> block(s) byte-for-byte unchanged.
+- Keep every CSS class name, id, and inline style exactly as-is.
+- Keep the full structure: same sections, same order, same nav and footer, same number of cards/items.
+- Keep every link (href) and every image (src) and its alt attribute. You MAY improve alt text wording but never remove an image or change its src.
+- Keep all phone numbers, addresses, and business facts exactly. Do NOT invent new facts, stats, prices, or claims.
+
+WHAT TO IMPROVE (this is the goal):
+- Sharpen the visible copy for search intent and clarity: the <h1>, section headings (<h2>/<h3>), intro paragraphs, FAQ questions and answers, and call-to-action text.
+- Make headings keyword-relevant and specific to this page's topic and location, without keyword stuffing.
+- Tighten weak or generic sentences. Keep the same meaning and every fact.
+- Keep the same language as the original.
+{WRITING_STANDARD}
+
+Return the COMPLETE HTML document exactly in the original's shape but with improved copy. Output the raw HTML only — no markdown fences, no commentary. Then on a final separate line, output:
+===SUMMARY=== <one plain sentence describing what you improved>
+
+Here is the page HTML to improve:
+\"\"\"
+{current_html}
+\"\"\""""
+
+    response = _get_client().messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=32000,
+        system="You are an SEO web developer. You improve a page's visible copy while preserving its structure, CSS, and scripts exactly. You output raw HTML followed by a one-line summary after a ===SUMMARY=== marker.",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    text = next((b.text for b in response.content if b.type == "text"), "")
+    html_part, _, summary = text.partition("===SUMMARY===")
+    return {
+        "html": _strip_fences(html_part),
+        "summary": (summary.strip() or "SEO rewrite of the page copy.")[:300],
+    }
+
+
 def generate_css(site_name: str, site_url: str, request: str,
                  current_css: str = "", rules: str = "") -> dict:
     """Produce the COMPLETE new Additional CSS for a visual change request.

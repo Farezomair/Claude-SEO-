@@ -16,6 +16,11 @@ WANTED_COLUMNS = {
         "old_value": "TEXT",
         "new_value": "TEXT",
     },
+    # Elementor page-rewrite targets, so an applied rewrite can be reverted.
+    "site_changes": {
+        "target_page_id": "INTEGER",
+        "target_widget_id": "VARCHAR(100)",
+    },
 }
 
 

@@ -221,7 +221,39 @@
         </table>
       </div>
     {% else %}
-      <div class="empty" style="margin-top:8px;">No changes yet. Note: this needs the helper plugin updated to v1.1 (I'll give you the file).</div>
+      <div class="empty" style="margin-top:8px;">No changes yet.</div>
+    {% endif %}
+
+    <h2 style="margin-top:32px;">Page content (Elementor)</h2>
+    <p class="muted" style="margin-top:0;">The On-page agent reads a page's real content and rewrites the copy for SEO, then sends it to <a href="/approvals">Approvals</a> with a full visual preview. Structure, styling, links and images are preserved, and every applied rewrite can be reverted in one click.</p>
+    {% if elementor_running %}
+      <div class="empty">Rewriting a page — this page refreshes automatically.</div>
+    {% elif latest_elementor_run and latest_elementor_run.status == 'failed' %}
+      <div class="notice notice-danger">{{ latest_elementor_run.summary }}</div>
+    {% endif %}
+    {% if elementor_pages %}
+      <div class="card" style="padding:0; margin-top:12px;">
+        <table>
+          <thead><tr><th>Page</th><th>Modified</th><th></th></tr></thead>
+          <tbody>
+            {% for p in elementor_pages %}
+            <tr>
+              <td>{{ p.title }}</td>
+              <td class="muted">{{ p.modified }}</td>
+              <td>
+                <form method="post" action="/sites/{{ site.id }}/rewrite-page">
+                  <input type="hidden" name="page_id" value="{{ p.id }}">
+                  <input type="hidden" name="page_title" value="{{ p.title }}">
+                  <button class="btn small" type="submit" {{ 'disabled' if elementor_running else '' }}>Rewrite for SEO</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% elif connection_active %}
+      <div class="empty" style="margin-top:8px;">No Elementor pages found (or the Abilities API isn't reachable on this site).</div>
     {% endif %}
   {% elif tab == 'reports' %}
     {% set running = latest_weekly_run and latest_weekly_run.status == 'running' %}

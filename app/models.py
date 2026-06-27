@@ -154,9 +154,12 @@ class SiteChange(Base):
     site_id = Column(Integer, ForeignKey("sites.id", ondelete="CASCADE"), nullable=False)
     kind = Column(String(50), default="website_css")
     request = Column(Text, default="")     # what the owner asked for
-    css = Column(Text, default="")         # the new Additional CSS to apply
-    old_css = Column(Text, default="")     # backup of the CSS before applying
+    css = Column(Text, default="")         # the new value to apply (CSS, or page HTML for page_rewrite)
+    old_css = Column(Text, default="")     # backup of the previous value, for one-click revert
     status = Column(String(20), default="proposed")  # proposed/applied/reverted/failed
+    # For kind="page_rewrite": which Elementor page + html widget the body lives in.
+    target_page_id = Column(Integer, nullable=True)
+    target_widget_id = Column(String(100), nullable=True)
     created_at = Column(DateTime, default=utcnow)
 
 
