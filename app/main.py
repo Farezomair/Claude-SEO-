@@ -67,7 +67,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "audit-phase2-9"
+BUILD = "audit-in-report-10"
 
 
 @app.get("/version")
@@ -406,6 +406,18 @@ def site_detail(
             db.query(Report).filter(Report.site_id == site_id)
             .order_by(Report.created_at.desc()).limit(20).all()
         )
+        # Latest scored audit, shown at the top of the report.
+        latest_audit = (
+            db.query(Audit).filter(Audit.site_id == site_id, Audit.status == "completed")
+            .order_by(Audit.created_at.desc()).first()
+        )
+        ctx["audit_score"] = latest_audit.health_score if latest_audit else None
+        ctx["audit_grade"] = latest_audit.grade if latest_audit else None
+        try:
+            ctx["audit_categories"] = json.loads(latest_audit.category_scores) if latest_audit and latest_audit.category_scores else []
+            ctx["audit_roadmap"] = json.loads(latest_audit.roadmap) if latest_audit and latest_audit.roadmap else []
+        except Exception:
+            ctx["audit_categories"], ctx["audit_roadmap"] = [], []
         # "What changed — before & after" feed for the report view.
         recs = (
             db.query(FixRecord)
