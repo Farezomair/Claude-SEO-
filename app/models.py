@@ -160,6 +160,22 @@ class SiteChange(Base):
     created_at = Column(DateTime, default=utcnow)
 
 
+class GoogleAuth(Base):
+    """A single global Google OAuth connection (Search Console, read-only).
+
+    One Google account's refresh token (encrypted) grants read access to all of
+    its Search Console properties; the GSC client matches each site to its
+    property at runtime. One-time connect, all sites.
+    """
+
+    __tablename__ = "google_auth"
+
+    id = Column(Integer, primary_key=True)
+    refresh_token_enc = Column(Text, default="")
+    email = Column(String(255), default="")
+    updated_at = Column(DateTime, default=utcnow)
+
+
 class Rulebook(Base):
     """Editable agent rules (Stage 6).
 

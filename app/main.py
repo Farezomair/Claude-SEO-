@@ -17,6 +17,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from .auth import check_credentials, current_user
 from .connections import get_connection
+from . import google_oauth
 from .content_agent import start_draft_async
 from .content_corrector import start_correction_async
 from .content_standard import scan
@@ -138,7 +139,7 @@ def root(request: Request):
 
 
 @app.get("/sites", response_class=HTMLResponse)
-def list_sites(request: Request, db: Session = Depends(get_db)):
+def list_sites(request: Request, gnotice: str = "", db: Session = Depends(get_db)):
     if not current_user(request):
         return RedirectResponse("/login", status_code=303)
     sites = db.query(Site).order_by(Site.created_at.desc()).all()
@@ -146,7 +147,7 @@ def list_sites(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(
         "sites.html",
         {"request": request, "sites": sites, "user": current_user(request),
-         "pending_count": pending_count},
+         "pending_count": pending_count, "gnotice": gnotice},
     )
 
 
@@ -284,6 +285,8 @@ def site_detail(
             db.query(SiteConnection).filter(SiteConnection.site_id == site_id).first()
         )
         ctx["connection_active"] = get_connection(site_id, site.url, site.name) is not None
+        ctx["google"] = google_oauth.connection()
+        ctx["google_configured"] = google_oauth.configured()
 
     return templates.TemplateResponse("site_detail.html", ctx)
 
@@ -357,6 +360,51 @@ def revert_change(site_id: int, change_id: int, request: Request, db: Session = 
         except WordPressError:
             return RedirectResponse(f"/sites/{site_id}?tab=website&notice=revert_fail", status_code=303)
     return RedirectResponse(f"/sites/{site_id}?tab=website&notice=reverted", status_code=303)
+
+
+def _google_redirect_uri(request: Request) -> str:
+    env = os.getenv("GOOGLE_REDIRECT_URI")
+    if env:
+        return env
+    uri = str(request.url_for("google_callback"))
+    # Railway terminates TLS, so the internal request looks like http. Force https
+    # for the public redirect (must match what's registered on the OAuth client).
+    if uri.startswith("http://") and "localhost" not in uri and "127.0.0.1" not in uri:
+        uri = "https://" + uri[len("http://"):]
+    return uri
+
+
+@app.get("/google/connect")
+def google_connect(request: Request):
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    if not google_oauth.configured():
+        return RedirectResponse("/sites?gnotice=not_configured", status_code=303)
+    return RedirectResponse(google_oauth.auth_url(_google_redirect_uri(request)))
+
+
+@app.get("/google/callback", name="google_callback")
+def google_callback(request: Request, code: str = "", error: str = ""):
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    if error or not code:
+        return RedirectResponse("/sites?gnotice=denied", status_code=303)
+    try:
+        refresh, email = google_oauth.exchange_code(code, _google_redirect_uri(request))
+        if not refresh:
+            return RedirectResponse("/sites?gnotice=no_refresh", status_code=303)
+        google_oauth.save_connection(refresh, email)
+    except Exception:
+        return RedirectResponse("/sites?gnotice=failed", status_code=303)
+    return RedirectResponse("/sites?gnotice=connected", status_code=303)
+
+
+@app.post("/google/disconnect")
+def google_disconnect(request: Request):
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    google_oauth.disconnect()
+    return RedirectResponse("/sites?gnotice=disconnected", status_code=303)
 
 
 @app.get("/rules", response_class=HTMLResponse)

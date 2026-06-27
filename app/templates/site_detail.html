@@ -321,6 +321,20 @@
     </div>
 
     <div class="card">
+      <h2>Google Search Console</h2>
+      <p class="muted" style="margin-top:0;">Unlocks real ranking data (positions, click-through, striking-distance keywords) for the SEO Auditor. One connection covers all your sites.</p>
+      {% if google %}
+        <p>Connected{% if google.email %} as <strong>{{ google.email }}</strong>{% endif %} <span class="badge badge-success">connected</span></p>
+        <form method="post" action="/google/disconnect"><button class="btn secondary small" type="submit">Disconnect</button></form>
+      {% elif google_configured %}
+        <p class="muted">Not connected yet.</p>
+        <a class="btn" href="/google/connect">Connect Google</a>
+      {% else %}
+        <div class="notice notice-muted">Google isn't set up yet. The owner needs to add the one-time OAuth client ID/secret in Railway (see the setup guide).</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
       <h2>Site details</h2>
       <p class="muted">Name</p>
       <p>{{ site.name }}</p>

@@ -9,6 +9,12 @@
     </div>
   </div>
 
+  {% if gnotice == 'connected' %}<div class="notice notice-success">Google Search Console connected. Re-run an audit to pull ranking data.</div>{% endif %}
+  {% if gnotice == 'disconnected' %}<div class="notice notice-muted">Google disconnected.</div>{% endif %}
+  {% if gnotice == 'denied' %}<div class="notice notice-danger">Google connection was cancelled.</div>{% endif %}
+  {% if gnotice in ('failed', 'no_refresh') %}<div class="notice notice-danger">Google connection failed. Try again, and make sure you granted access.</div>{% endif %}
+  {% if gnotice == 'not_configured' %}<div class="notice notice-danger">Google isn't set up yet — the OAuth client ID/secret are missing in Railway.</div>{% endif %}
+
   <div class="card">
     <h2>Add a website</h2>
     <form method="post" action="/sites">

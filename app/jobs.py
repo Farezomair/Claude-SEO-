@@ -9,6 +9,7 @@ import threading
 
 from .crawler import crawl_site
 from .database import SessionLocal
+from .gsc import gsc_findings
 from .models import Audit, Finding, RunLog
 from .routing import classify
 
@@ -28,16 +29,24 @@ def _run_audit(site_id: int, audit_id: int, start_url: str) -> None:
             db.commit()
             return
 
-        # The Website Auditor produces structured, routed Findings.
-        for seq, iss in enumerate(result["issues"], start=1):
+        # Crawl findings + Search Console findings (when connected) — both routed.
+        all_issues = list(result["issues"])
+        try:
+            all_issues += gsc_findings(start_url)
+        except Exception:
+            pass  # GSC is best-effort; never let it break the audit
+
+        for seq, iss in enumerate(all_issues, start=1):
             cls = classify(iss["category"])
             db.add(Finding(
                 site_id=site_id, audit_id=audit_id,
                 finding_key=f"WA-{site_id}-{audit_id}-{seq}",
                 mode="audit", group=cls["group"], category=iss["category"],
                 issue=iss["detail"], severity=iss["severity"],
+                finding_type=iss.get("finding_type", "defect"),
                 route=cls["route"], action_class=cls["action_class"],
-                evidence_url=iss["url"], detection_source="crawl", status="open",
+                evidence_url=iss["url"], detection_source=iss.get("detection_source", "crawl"),
+                status="open",
             ))
         s = result["stats"]
         audit.status = "completed"
