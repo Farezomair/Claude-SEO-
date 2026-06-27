@@ -64,7 +64,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "abilities-get-bracket-2"
+BUILD = "elementor-probe-multi-3"
 
 
 @app.get("/version")
@@ -649,37 +649,32 @@ def elementor_probe(site_id: int, request: Request, page_id: int = 0,
         return JSONResponse({"error": "No WordPress connection."}, status_code=400)
     client = AbilitiesClient(conn["url"], conn["username"], conn["app_password"])
     P = "hostinger-ai-assistant"
+    WIDGET_TYPES = ["heading", "text-editor", "button", "html", "image", "icon-box", "icon-list"]
     out: dict = {}
     try:
         out["list_pages"] = client.read(f"{P}/elementor-list-pages",
-                                        {"post_type": "page", "post_status": "publish", "limit": 20})
+                                        {"post_type": "page", "post_status": "publish", "limit": 30})
     except (AbilitiesError, AbilitiesUnavailable) as exc:
         return JSONResponse({"error": f"list-pages failed: {exc}"}, status_code=200)
 
-    # Pick a page id to inspect: the one passed in, else the first listed page.
-    if not page_id:
-        try:
-            lp = out["list_pages"]
-            # tolerate several envelope shapes
-            blob = lp.get("result", lp) if isinstance(lp, dict) else lp
-            items = (blob.get("pages") or blob.get("items") or blob.get("data")
-                     or (blob if isinstance(blob, list) else [])) if isinstance(blob, (dict, list)) else []
-            if items:
-                first = items[0]
-                page_id = first.get("id") or first.get("ID") or first.get("post_id") or 0
-        except Exception:
-            page_id = 0
-    out["picked_page_id"] = page_id
-    if page_id:
+    def inspect(pid: int) -> dict:
+        res: dict = {}
         for label, name, payload in (
-            ("structure", f"{P}/elementor-get-page-structure", {"post_id": page_id, "include_settings": True}),
+            ("structure", f"{P}/elementor-get-page-structure",
+             {"post_id": pid, "include_settings": True}),
             ("find_widgets", f"{P}/elementor-find-widgets",
-             {"post_id": page_id, "widget_types": ["heading", "text-editor", "button"], "include_settings": True}),
+             {"post_id": pid, "widget_types": WIDGET_TYPES, "include_settings": True}),
         ):
             try:
-                out[label] = client.read(name, payload)
+                res[label] = client.read(name, payload)
             except (AbilitiesError, AbilitiesUnavailable) as exc:
-                out[label] = {"error": str(exc)}
+                res[label] = {"error": str(exc)}
+        return res
+
+    # Sample representative page types: a service page, a location page, the home
+    # page — unless a specific page_id was requested.
+    sample_ids = [page_id] if page_id else [22, 39, 12]
+    out["inspected"] = {str(pid): inspect(pid) for pid in sample_ids}
     return JSONResponse(out)
 
 
