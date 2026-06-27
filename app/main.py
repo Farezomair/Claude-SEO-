@@ -33,10 +33,11 @@ from .rules import SCOPES as RULE_SCOPES
 from .rules import get_rules, set_rules
 from .scheduler import ENABLED as SCHEDULER_ENABLED
 from .scheduler import INTERVAL_DAYS, is_due, start_scheduler
+from .onpage_agent import start_meta_rewrites_async
 from .seo_technical import start_metafix_async
 from .website_agent import start_change_async, start_page_drafts_async
 from .weekly import start_weekly_async
-from .wordpress import WordPressClient, WordPressError
+from .wordpress import YOAST_DESC_KEY, YOAST_TITLE_KEY, WordPressClient, WordPressError
 
 # Whether approved content is sent to WordPress as a draft (safe — needs a final
 # Publish click in WP) or published live. Defaults to draft.
@@ -227,6 +228,15 @@ def site_detail(
                 ).first() is not None
             )
             ctx["page_connection_active"] = get_connection(site_id, site.url, site.name) is not None
+            # How many Search Console ranking opportunities SEO On-page can act on.
+            ctx["ranking_opps"] = sum(
+                1 for f in findings if f.category in ("striking_distance", "low_ctr")
+            )
+            ctx["onpage_running"] = (
+                db.query(JobRun).filter(
+                    JobRun.site_id == site_id, JobRun.kind == "onpage", JobRun.status == "running"
+                ).first() is not None
+            )
 
     elif tab == "fixes":
         ctx["latest_fix_run"] = (
@@ -483,6 +493,31 @@ def correct_content_route(site_id: int, request: Request, db: Session = Depends(
     return RedirectResponse(f"/sites/{site_id}?tab=content", status_code=303)
 
 
+@app.post("/sites/{site_id}/improve-rankings")
+def improve_rankings(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """SEO On-page: rewrite title/meta for the Search Console ranking opportunities."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return RedirectResponse(f"/sites/{site_id}?tab=settings&notice=test_none", status_code=303)
+    already = (
+        db.query(JobRun)
+        .filter(JobRun.site_id == site_id, JobRun.kind == "onpage", JobRun.status == "running")
+        .first()
+    )
+    if not already:
+        run = JobRun(site_id=site_id, kind="onpage", status="running", summary="Improving ranking pages…")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        start_meta_rewrites_async(site_id, run.id, conn)
+    return RedirectResponse(f"/sites/{site_id}?tab=audit", status_code=303)
+
+
 @app.post("/sites/{site_id}/draft-pages")
 def draft_pages(site_id: int, request: Request, db: Session = Depends(get_db)):
     """Website Agent: draft the missing required pages the auditor flagged."""
@@ -569,6 +604,40 @@ def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
             site_id=site.id,
             message=f"Approved & sent to WordPress ({result.get('status')}): {content.title} {result.get('link', '')}",
         ))
+
+    elif appr.kind == "meta_rewrite":
+        payload = json.loads(appr.payload or "{}")
+        conn = get_connection(site.id, site.url, site.name)
+        if not conn:
+            return RedirectResponse("/approvals?notice=no_connection", status_code=303)
+        kind, page_id = payload.get("page_kind", "posts"), payload.get("page_id")
+        new_title, new_desc = payload.get("new_title", ""), payload.get("new_desc", "")
+        try:
+            wp = WordPressClient(conn["url"], conn["username"], conn["app_password"])
+            meta = {}
+            if new_title:
+                meta[YOAST_TITLE_KEY] = new_title
+            if new_desc:
+                meta[YOAST_DESC_KEY] = new_desc
+            wp.update_meta(kind, page_id, meta)
+            live = wp.get_meta(kind, page_id)
+            verified = (not new_title or (live.get(YOAST_TITLE_KEY) or "").strip() == new_title.strip())
+        except WordPressError as exc:
+            db.add(RunLog(site_id=site.id, message=f"Meta rewrite failed for “{appr.title}”: {exc}"))
+            db.commit()
+            return RedirectResponse("/approvals?notice=publish_fail", status_code=303)
+        finding = db.get(Finding, payload.get("finding_id"))
+        if finding:
+            finding.status = "closed"
+        db.add(FixRecord(
+            site_id=site.id, finding_id=payload.get("finding_id"), doer="SEO On-page",
+            action_taken=f"Rewrote title/description: {new_title}", page_ref=str(page_id),
+            field="title+description", before_value=f"{payload.get('old_title', '')} | {payload.get('old_desc', '')}",
+            after_value=f"{new_title} | {new_desc}", method="gate-approved", lane="gated", applied=True,
+            verification_verdict="verified" if verified else "not_fixed", status="done",
+            outcome_pending=True,  # ranking result lags
+        ))
+        db.add(RunLog(site_id=site.id, message=f"Applied ranking rewrite: {new_title}"))
 
     elif appr.kind == "content_fix":
         payload = json.loads(appr.payload or "{}")
@@ -664,6 +733,10 @@ def reject(approval_id: int, request: Request, db: Session = Depends(get_db)):
             finding = db.get(Finding, payload.get("finding_id")) if payload.get("finding_id") else None
             if finding:
                 finding.status = "open"  # back to the queue
+    elif appr.kind == "meta_rewrite":
+        finding = db.get(Finding, payload.get("finding_id")) if payload.get("finding_id") else None
+        if finding:
+            finding.status = "open"
     elif appr.kind == "website_css":
         change = db.get(SiteChange, payload.get("change_id")) if payload.get("change_id") else None
         if change:

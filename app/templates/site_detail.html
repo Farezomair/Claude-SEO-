@@ -7,6 +7,9 @@
   {% if tab == 'audit' and page_draft_running %}
   <meta http-equiv="refresh" content="6">
   {% endif %}
+  {% if tab == 'audit' and onpage_running %}
+  <meta http-equiv="refresh" content="6">
+  {% endif %}
   {% if tab == 'fixes' and latest_fix_run and latest_fix_run.status == 'running' %}
   <meta http-equiv="refresh" content="6">
   {% endif %}
@@ -69,6 +72,16 @@
           <form method="post" action="/sites/{{ site.id }}/draft-pages">
             <button class="btn small" type="submit" {{ 'disabled' if page_draft_running else '' }}>
               {{ 'Drafting…' if page_draft_running else 'Draft missing pages' }}
+            </button>
+          </form>
+        </div>
+      {% endif %}
+      {% if ranking_opps and page_connection_active %}
+        <div class="card row-between">
+          <div>SEO On-page can improve <strong>{{ ranking_opps }} ranking opportunity(ies)</strong> from Search Console (rewrite title &amp; description for more clicks).</div>
+          <form method="post" action="/sites/{{ site.id }}/improve-rankings">
+            <button class="btn small" type="submit" {{ 'disabled' if onpage_running else '' }}>
+              {{ 'Working…' if onpage_running else 'Improve ranking pages' }}
             </button>
           </form>
         </div>

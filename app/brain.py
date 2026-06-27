@@ -177,6 +177,52 @@ Respond with ONLY a JSON object, no preamble, in exactly this shape:
     }
 
 
+def improve_meta(page_title: str, page_url: str, content_excerpt: str,
+                 current_title: str, current_desc: str, target_query: str = "",
+                 site_name: str = "", rules: str = "") -> dict:
+    """Rewrite an existing page's meta title + description to earn more clicks
+    from Google. Returns {"title", "description"}."""
+    if target_query:
+        goal = (f'This page ranks on Google for the query "{target_query}" but needs a '
+                "stronger title and description to win more clicks and climb toward page 1.")
+    else:
+        goal = ("This page earns impressions on Google but a weak click-through rate, so its "
+                "title and description must be more compelling and specific.")
+
+    prompt = f"""You are an SEO copywriter improving an EXISTING page's meta title and description.{_rules_block(rules)}
+
+Site: {site_name}
+Page: {page_url}
+Page heading: {page_title}
+Current meta title: {current_title or "(none set)"}
+Current meta description: {current_desc or "(none set)"}
+
+{goal}
+
+Rules: title 50-60 characters, lead with the keyword/intent, compelling and specific to THIS page.
+Description 140-155 characters, accurate, invite the click. Never use em dashes.
+
+Page content excerpt:
+\"\"\"
+{content_excerpt}
+\"\"\"
+
+Respond with ONLY a JSON object, no preamble:
+{{"title": "...", "description": "..."}}"""
+
+    response = _get_client().messages.create(
+        model=ANTHROPIC_MODEL, max_tokens=1024,
+        system="You are an SEO copywriter. You respond only with a single JSON object.",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    text = next((b.text for b in response.content if b.type == "text"), "")
+    data = _extract_json(text)
+    return {
+        "title": str(data.get("title", "")).strip().strip('"')[:TITLE_MAX],
+        "description": str(data.get("description", "")).strip().strip('"')[:DESC_MAX],
+    }
+
+
 def correct_content(title: str, body_html: str, rules: str = "") -> dict:
     """Editorial cleanup of EXISTING content: strip em dashes, banned vocabulary,
     filler, and padding while PRESERVING meaning and every factual claim.
