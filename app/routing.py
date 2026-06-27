@@ -37,6 +37,10 @@ _TABLE = {
     "no_https": ("security", "Website Agent", "needs-approval"),
     "mixed_content": ("security", "Website Agent", "needs-approval"),
     "security_headers": ("security", "Website Agent", "needs-approval"),
+    # Orphan pages (group A) -> Website Agent
+    "orphan_page": ("site-integrity", "Website Agent", "needs-approval"),
+    # Open Graph / social tags (group D) -> SEO On-page
+    "og_incomplete": ("meta", "SEO On-page", "needs-approval"),
     # Content depth (SEO Auditor group C) -> Content Corrector
     "thin_content": ("content-depth", "Content Corrector", "needs-approval"),
     # Schema validity/richness (group F) -> SEO Technical

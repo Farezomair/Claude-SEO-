@@ -88,6 +88,22 @@ def _schema_types(data) -> set:
     walk(data)
     return found
 
+
+def _sitemap_locs(client, text: str, depth: int = 0) -> set:
+    """Collect <loc> URLs from a sitemap, following one level of sitemap index."""
+    locs = re.findall(r"<loc>\s*(.*?)\s*</loc>", text, re.I | re.S)
+    if "<sitemapindex" in text.lower() and depth < 1:
+        urls: set[str] = set()
+        for sm in locs[:6]:
+            try:
+                sub = client.get(sm)
+                if sub.status_code == 200:
+                    urls |= _sitemap_locs(client, sub.text, depth + 1)
+            except Exception:
+                pass
+        return urls
+    return set(locs)
+
 MAX_PAGES = 30
 MAX_LINK_CHECKS = 150
 MAX_QUEUE = MAX_PAGES * 4
@@ -139,6 +155,7 @@ def crawl_site(start_url: str) -> dict:
     reported_broken: set[str] = set()
     schema_reported: set[str] = set()   # dedupe template-wide schema issues
     internal_paths: set[str] = set()
+    linked_internal: set[str] = set()   # internal URLs seen as links (for orphan detection)
     titles: dict[str, str] = {}            # url -> title (for duplicate detection)
     pages_crawled = 0
     links_checked = 0
@@ -276,6 +293,7 @@ def crawl_site(start_url: str) -> dict:
                 internal = _same_domain(link, start_url)
                 if internal:
                     internal_paths.add(urlparse(link).path.lower())
+                    linked_internal.add(link)
                     if (link not in visited and link not in queue
                             and len(visited) + len(queue) < MAX_QUEUE):
                         queue.append(link)
@@ -313,24 +331,43 @@ def crawl_site(start_url: str) -> dict:
                                                      f"Link returns HTTP {status}: {link}"))
 
         # ---------------- site-wide checks ----------------
-        # robots.txt + sitemap
+        home_soup = BeautifulSoup(homepage_html, "html.parser") if homepage_html else None
+
+        # robots.txt
         try:
             if client.get(origin + "/robots.txt").status_code >= 400:
                 issues.append(_issue("indexation", "low", origin, "No robots.txt found"))
         except Exception:
             pass
+
+        # sitemap existence + collect its URLs (for orphan detection)
+        sitemap_urls: set[str] = set()
         sitemap_found = False
         for path in ("/sitemap.xml", "/sitemap_index.xml", "/wp-sitemap.xml"):
             try:
                 sr = client.get(origin + path)
                 if sr.status_code == 200 and "<" in sr.text[:200]:
                     sitemap_found = True
+                    sitemap_urls = _sitemap_locs(client, sr.text)
                     break
             except Exception:
                 pass
         if not sitemap_found:
             issues.append(_issue("indexation", "medium", origin,
                                  "No sitemap.xml found — search engines may miss pages"))
+
+        # orphan pages: in the sitemap but never seen as an internal link. Only
+        # trustworthy when the crawl EXHAUSTED all reachable links (didn't hit the
+        # page cap); otherwise a page linked from an uncrawled page looks falsely
+        # orphaned. So we skip orphan detection on sites larger than the cap.
+        internal_sitemap = {u for u in sitemap_urls if _same_domain(u, start_url)}
+        if internal_sitemap and pages_crawled < MAX_PAGES:
+            reachable = {_normalize(u) for u in linked_internal} | {_normalize(u) for u in visited}
+            orphans = [u for u in internal_sitemap
+                       if _normalize(u) not in reachable and _normalize(u) != home_norm]
+            for u in orphans[:5]:
+                issues.append(_issue("orphan_page", "low", u,
+                                     "Page is in the sitemap but not linked from any other page"))
 
         # required pages (via discovered internal links)
         for name, (keywords, sev) in REQUIRED_PAGES.items():
@@ -339,13 +376,24 @@ def crawl_site(start_url: str) -> dict:
                                      f"No {name} page found in the site's links"))
 
         # favicon
-        if homepage_html and not BeautifulSoup(homepage_html, "html.parser").find(
-                "link", attrs={"rel": ICON_RE}):
+        if home_soup is not None and not home_soup.find("link", attrs={"rel": ICON_RE}):
             try:
                 if client.get(origin + "/favicon.ico").status_code >= 400:
                     issues.append(_issue("missing_favicon", "low", origin, "No favicon found"))
             except Exception:
                 pass
+
+        # Open Graph / social-preview tags (homepage, template-representative)
+        if home_soup is not None:
+            missing_social = []
+            for prop in ("og:title", "og:description", "og:image"):
+                if not home_soup.find("meta", attrs={"property": prop}):
+                    missing_social.append(prop)
+            if not home_soup.find("meta", attrs={"name": "twitter:card"}):
+                missing_social.append("twitter:card")
+            if missing_social:
+                issues.append(_issue("og_incomplete", "low", origin,
+                                     "Missing social/preview tags: " + ", ".join(missing_social)))
 
         # security headers (homepage)
         if homepage_headers:
