@@ -11,6 +11,7 @@ import re
 import anthropic
 
 from .content_standard import BANNED
+from .knowledge import EEAT_GUIDE, GEO_GUIDE, META_GUIDE
 
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-8")
 
@@ -60,6 +61,8 @@ def generate_meta(page_title: str, page_url: str, content_excerpt: str,
                   site_name: str = "", rules: str = "") -> dict:
     """Return {"title": str, "description": str} for a page."""
     prompt = f"""You are an expert SEO copywriter. Write an SEO meta title and meta description for this web page.{_rules_block(rules)}
+
+{META_GUIDE}
 
 Site name: {site_name or "(unknown)"}
 Page URL: {page_url}
@@ -191,6 +194,8 @@ def improve_meta(page_title: str, page_url: str, content_excerpt: str,
 
     prompt = f"""You are an SEO copywriter improving an EXISTING page's meta title and description.{_rules_block(rules)}
 
+{META_GUIDE}
+
 Site: {site_name}
 Page: {page_url}
 Page heading: {page_title}
@@ -288,6 +293,11 @@ WHAT TO IMPROVE (this is the goal):
 - Make headings keyword-relevant and specific to this page's topic and location, without keyword stuffing.
 - Tighten weak or generic sentences. Keep the same meaning and every fact.
 - Keep the same language as the original.
+
+Apply this expert SEO guidance when improving the copy:
+{EEAT_GUIDE}
+
+{GEO_GUIDE}
 {WRITING_STANDARD}
 
 Return the COMPLETE HTML document exactly in the original's shape but with improved copy. Output the raw HTML only — no markdown fences, no commentary. Then on a final separate line, output:
@@ -336,11 +346,10 @@ Visible page text (may be truncated):
 {text[:6000]}
 \"\"\"
 
-Judge:
-- E-E-A-T: a named author or clear business identity, credentials/real experience, trust signals (contact, specifics, guarantees), accurate non-generic info.
-- Depth & usefulness: does it fully serve the page's intent, or is it thin/filler?
-- Freshness: signals it is outdated (old years, stale references)?
-- AI citability (GEO): clear quotable facts/stats, a direct answer near the top, and structured/Q&A passages an AI assistant could lift.
+Judge against this expert standard:
+{EEAT_GUIDE}
+
+{GEO_GUIDE}
 
 Respond with ONLY a JSON object, no preamble:
 {{"content_score": 0-100, "geo_score": 0-100, "findings": [{{"category": "eeat_weak|content_shallow|content_stale|geo_unstructured", "severity": "low|medium|high", "detail": "specific, actionable observation about THIS page"}}]}}
