@@ -55,6 +55,15 @@ def _run_audit(site_id: int, audit_id: int, start_url: str) -> None:
         except Exception:
             pass
 
+        # The fresh audit is the source of truth: retire prior live findings so
+        # they can't get stuck (in-progress with a lost approval) or accumulate
+        # across runs. Anything still wrong is re-detected below as a new finding.
+        (db.query(Finding)
+         .filter(Finding.site_id == site_id,
+                 Finding.status.in_(("open", "in-progress", "reopened", "escalated")))
+         .update({Finding.status: "superseded"}, synchronize_session=False))
+        db.commit()
+
         for seq, iss in enumerate(all_issues, start=1):
             cls = classify(iss["category"])
             db.add(Finding(

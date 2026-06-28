@@ -26,13 +26,20 @@ def get_connection(site_id: int, site_url: str = "", site_name: str = "") -> dic
     try:
         conn = db.query(SiteConnection).filter(SiteConnection.site_id == site_id).first()
         if conn and conn.wp_url and conn.wp_username and conn.wp_app_password_enc:
-            return {
-                "url": conn.wp_url,
-                "username": conn.wp_username,
-                "app_password": decrypt(conn.wp_app_password_enc),
-                "site_name": site_name,
-                "source": "settings",
-            }
+            try:
+                pw = decrypt(conn.wp_app_password_enc)
+            except Exception:
+                # Key rotated / corrupt ciphertext: don't crash every WP call —
+                # fall through so the UI can prompt the owner to reconnect.
+                pw = None
+            if pw:
+                return {
+                    "url": conn.wp_url,
+                    "username": conn.wp_username,
+                    "app_password": pw,
+                    "site_name": site_name,
+                    "source": "settings",
+                }
     finally:
         db.close()
 

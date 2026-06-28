@@ -27,7 +27,7 @@
         <details>
           <summary style="cursor:pointer; color:var(--accent);">Preview content</summary>
           <div style="border:1px solid var(--border); border-radius:8px; padding:16px; margin-top:12px; max-height:360px; overflow:auto; background:#fff; color:#111;">
-            {{ item.body | safe }}
+            {{ item.body | sanitize }}
           </div>
         </details>
       {% endif %}

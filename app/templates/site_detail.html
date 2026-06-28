@@ -578,7 +578,7 @@
           <span class="muted">{{ r.created_at | pkt }}</span>
         </div>
         <p class="muted" style="margin-top:0;">{{ r.summary }}</p>
-        <div>{{ r.body_html | safe }}</div>
+        <div>{{ r.body_html | sanitize }}</div>
       </div>
       {% endfor %}
     {% else %}

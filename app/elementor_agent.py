@@ -81,7 +81,10 @@ def apply_html(client: AbilitiesClient, page_id: int, widget_id: str, html: str)
         data_str = (((page or {}).get("meta") or {}).get("_elementor_data")) or ""
         if not data_str:
             raise AbilitiesError("Could not read _elementor_data to edit the page body.")
-        data = json.loads(data_str)
+        try:
+            data = json.loads(data_str)
+        except (ValueError, TypeError) as exc:
+            raise AbilitiesError(f"Page Elementor data is not valid JSON; not editing: {exc}")
         if not _set_widget_html(data, widget_id, html):
             raise AbilitiesError(f"Widget {widget_id} not found in the page's Elementor data.")
         client.run(A_PAGE_UPDATE, {"id": page_id, "meta": {"_elementor_data": json.dumps(data)}})

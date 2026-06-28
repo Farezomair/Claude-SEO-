@@ -62,13 +62,15 @@ app = FastAPI(title="SEO Agent System")
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SECRET_KEY", "dev-only-insecure-change-me"),
+    same_site="strict",   # mitigate CSRF: cookie not sent on cross-site requests
+    https_only=os.getenv("COOKIE_INSECURE") != "1",  # set COOKIE_INSECURE=1 for local http dev
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "schema-doer-15"
+BUILD = "sweep-fixes-16"
 
 
 @app.get("/version")
@@ -102,6 +104,36 @@ def _badge(status) -> Markup:
 
 
 templates.env.filters["badge"] = _badge
+
+import re as _re
+
+_XSS_BLOCK = _re.compile(r"<\s*(script|iframe|object|embed|form)\b[^>]*>.*?<\s*/\s*\1\s*>", _re.I | _re.S)
+_XSS_VOID = _re.compile(r"<\s*(script|iframe|object|embed)\b[^>]*/?>", _re.I)
+_XSS_ON = _re.compile(r"\son\w+\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]+)", _re.I)
+_XSS_JS = _re.compile(r"(href|src)\s*=\s*([\"']?)\s*javascript:[^\"'>\s]*", _re.I)
+
+
+def _sanitize(html) -> Markup:
+    """Render DB/AI-generated HTML with the main XSS vectors stripped (scripts,
+    iframes, inline on*= handlers, javascript: URIs). Used instead of |safe."""
+    s = str(html or "")
+    s = _XSS_BLOCK.sub("", s)
+    s = _XSS_VOID.sub("", s)
+    s = _XSS_ON.sub("", s)
+    s = _XSS_JS.sub(r"\1=\2", s)
+    return Markup(s)
+
+
+templates.env.filters["sanitize"] = _sanitize
+
+
+def _flush_cache(conn) -> None:
+    """Best-effort LiteSpeed cache flush so a gated live write shows immediately."""
+    try:
+        AbilitiesClient(conn["url"], conn["username"], conn["app_password"]).run(
+            "hostinger-ai-assistant/litespeed-cache-flush", {})
+    except Exception:
+        pass
 
 
 def _pkt(dt) -> str:
@@ -1037,11 +1069,15 @@ def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
                 meta[YOAST_DESC_KEY] = new_desc
             wp.update_meta(kind, page_id, meta)
             live = wp.get_meta(kind, page_id)
-            verified = (not new_title or (live.get(YOAST_TITLE_KEY) or "").strip() == new_title.strip())
+            verified = (
+                (not new_title or (live.get(YOAST_TITLE_KEY) or "").strip() == new_title.strip())
+                and (not new_desc or (live.get(YOAST_DESC_KEY) or "").strip() == new_desc.strip())
+            )
         except WordPressError as exc:
             db.add(RunLog(site_id=site.id, message=f"Meta rewrite failed for “{appr.title}”: {exc}"))
             db.commit()
             return RedirectResponse("/approvals?notice=publish_fail", status_code=303)
+        _flush_cache(conn)
         finding = db.get(Finding, payload.get("finding_id"))
         if finding:
             finding.status = "closed"
@@ -1075,6 +1111,7 @@ def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
             db.add(RunLog(site_id=site.id, message=f"Content cleanup failed for “{appr.title}”: {exc}"))
             db.commit()
             return RedirectResponse("/approvals?notice=publish_fail", status_code=303)
+        _flush_cache(conn)
         after_clean = scan(content.body)
         db.add(FixRecord(
             site_id=site.id, doer="Content Corrector",
@@ -1121,6 +1158,7 @@ def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
             db.add(RunLog(site_id=site.id, message=f"Website change failed for “{appr.title}”: {exc}"))
             db.commit()
             return RedirectResponse("/approvals?notice=publish_fail", status_code=303)
+        _flush_cache(conn)
         change.status = "applied"
         db.add(RunLog(site_id=site.id, message=f"Applied website change: {change.request[:80]}"))
 

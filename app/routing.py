@@ -69,7 +69,7 @@ _TABLE = {
     "nap_missing": ("local", "Website Agent", "needs-approval"),
     # Content / E-E-A-T (Claude analyzer, phase 2)
     "eeat_weak": ("content", "Content Corrector", "needs-approval"),
-    "content_shallow": ("content", "Content Writer", "needs-approval"),
+    "content_shallow": ("content", "Content Corrector", "needs-approval"),
     "content_stale": ("content", "Content Corrector", "needs-approval"),
     # Performance (PageSpeed analyzer, phase 2)
     "cwv_poor": ("performance", "Website Agent", "needs-human"),
