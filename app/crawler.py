@@ -92,6 +92,23 @@ def _schema_types(data) -> set:
 AI_CRAWLERS = ["GPTBot", "OAI-SearchBot", "ChatGPT-User", "ClaudeBot", "anthropic-ai",
                "PerplexityBot", "Google-Extended", "CCBot", "Bytespider"]
 ENTITY_SCHEMA = {"organization", "localbusiness", "website", "person", "professionalservice"}
+# Common LocalBusiness subtypes (lowercased). The schema generator emits the most
+# SPECIFIC subtype (e.g. GeneralContractor), so detection must recognize them too —
+# otherwise an injected GeneralContractor block isn't seen and the finding loops
+# forever. Shared with schema_agent so the doer's guard and the detector agree.
+LOCALBUSINESS_SUBTYPES = {
+    "localbusiness", "organization", "professionalservice", "store", "shoppingcenter",
+    "generalcontractor", "homeandconstructionbusiness", "plumber", "electrician",
+    "roofingcontractor", "hvacbusiness", "locksmith", "movingcompany", "housepainter",
+    "landscaper", "cleaningservice", "selfstorage", "pestcontrolservice",
+    "restaurant", "foodestablishment", "cafeorcoffeeshop", "bakery", "bar", "barorpub",
+    "dentist", "physician", "hospital", "medicalbusiness", "medicalclinic", "pharmacy",
+    "veterinarycare", "healthandbeautybusiness", "beautysalon", "hairsalon", "daycare",
+    "legalservice", "attorney", "lawfirm", "accountingservice", "financialservice",
+    "insuranceagency", "realestateagent", "automotivebusiness", "autorepair", "autodealer",
+    "gym", "sportsactivitylocation", "lodgingbusiness", "hotel", "travelagency",
+    "emergencyservice", "childcare", "fooddeliveryservice", "foodservice",
+}
 PHONE_RE = re.compile(r"\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}")
 
 
@@ -497,13 +514,15 @@ def crawl_site(start_url: str) -> dict:
             pass
 
         home_types = _home_schema_types(home_soup)
-        has_entity = bool(home_types & ENTITY_SCHEMA) or any("business" in t for t in home_types)
+        has_entity = (bool(home_types & ENTITY_SCHEMA) or any("business" in t for t in home_types)
+                      or bool(home_types & LOCALBUSINESS_SUBTYPES))
         if home_soup is not None and not has_entity:
             issues.append(_issue("no_entity_schema", "medium", origin,
                                  "Homepage has no Organization/LocalBusiness entity schema — weakens AI and Knowledge Graph understanding of who you are"))
 
         # --- local SEO signals ---
-        has_localbusiness = any(t == "localbusiness" or "business" in t for t in home_types)
+        has_localbusiness = (any(t == "localbusiness" or "business" in t for t in home_types)
+                             or bool(home_types & LOCALBUSINESS_SUBTYPES))
         if home_soup is not None and not has_localbusiness:
             issues.append(_issue("no_localbusiness_schema", "low", origin,
                                  "No LocalBusiness schema — important for local rankings and Google Business Profile alignment"))

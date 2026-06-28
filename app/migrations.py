@@ -33,6 +33,10 @@ WANTED_COLUMNS = {
     "findings": {
         "remark": "TEXT",
     },
+    # 'Request amendment' transient status note on a pending approval.
+    "approvals": {
+        "amend_note": "TEXT",
+    },
     # Scored audit (rebuilt auditor).
     "audits": {
         "health_score": "INTEGER",

@@ -59,10 +59,24 @@ def _rules_block(rules: str) -> str:
     return f"\n\nHouse rules you MUST follow:\n{rules}\n" if rules else ""
 
 
+def _amend_block(instructions: str) -> str:
+    """Owner feedback from a 'Request amendment' — fold their wishes into the prompt.
+
+    The owner reviewed a previous proposal and asked for specific changes; these take
+    priority over the generic instructions below (but never over the preservation/safety
+    rules in each prompt)."""
+    instructions = (instructions or "").strip()
+    if not instructions:
+        return ""
+    return ("\n\nIMPORTANT — the site owner reviewed your previous version and asked for the "
+            "following specific changes. Honour them precisely while still obeying every other "
+            f"rule below:\n\"\"\"\n{instructions}\n\"\"\"\n")
+
+
 def generate_meta(page_title: str, page_url: str, content_excerpt: str,
-                  site_name: str = "", rules: str = "") -> dict:
+                  site_name: str = "", rules: str = "", instructions: str = "") -> dict:
     """Return {"title": str, "description": str} for a page."""
-    prompt = f"""You are an expert SEO copywriter. Write an SEO meta title and meta description for this web page.{_rules_block(rules)}
+    prompt = f"""You are an expert SEO copywriter. Write an SEO meta title and meta description for this web page.{_rules_block(rules)}{_amend_block(instructions)}
 
 {META_GUIDE}
 
@@ -97,12 +111,13 @@ Respond with ONLY a JSON object, no preamble and no markdown, in exactly this sh
     return {"title": title, "description": description}
 
 
-def generate_article(site_name: str, site_url: str, topic: str = "", rules: str = "") -> dict:
+def generate_article(site_name: str, site_url: str, topic: str = "", rules: str = "",
+                     instructions: str = "") -> dict:
     """Draft a blog post. Returns {"title", "meta_description", "body_html"}."""
     topic_line = f"Write about this topic: {topic}" if topic.strip() else \
         "Choose a useful, search-worthy topic that fits this business and its likely customers."
 
-    prompt = f"""You are an expert SEO content writer creating a blog post for a business website.{_rules_block(rules)}
+    prompt = f"""You are an expert SEO content writer creating a blog post for a business website.{_rules_block(rules)}{_amend_block(instructions)}
 
 Business: {site_name}
 Website: {site_url}
@@ -143,7 +158,8 @@ PAGE_BRIEFS = {
 }
 
 
-def generate_page(site_name: str, site_url: str, page_type: str, rules: str = "") -> dict:
+def generate_page(site_name: str, site_url: str, page_type: str, rules: str = "",
+                  instructions: str = "") -> dict:
     """Draft a missing required page. Returns {"title", "body_html", "legal"}."""
     brief = PAGE_BRIEFS.get(page_type, f"a {page_type} page")
     legal = page_type in LEGAL_PAGES
@@ -157,7 +173,7 @@ def generate_page(site_name: str, site_url: str, page_type: str, rules: str = ""
         guidance = ("Write helpful, specific content for this business. Use bracketed "
                     "placeholders like [phone], [address], [email] for details you don't know.")
 
-    prompt = f"""Write {brief} for the website {site_name} ({site_url}).{_rules_block(rules)}
+    prompt = f"""Write {brief} for the website {site_name} ({site_url}).{_rules_block(rules)}{_amend_block(instructions)}
 
 {guidance}
 
@@ -184,7 +200,7 @@ Respond with ONLY a JSON object, no preamble, in exactly this shape:
 
 def improve_meta(page_title: str, page_url: str, content_excerpt: str,
                  current_title: str, current_desc: str, target_query: str = "",
-                 site_name: str = "", rules: str = "") -> dict:
+                 site_name: str = "", rules: str = "", instructions: str = "") -> dict:
     """Rewrite an existing page's meta title + description to earn more clicks
     from Google. Returns {"title", "description"}."""
     if target_query:
@@ -194,7 +210,7 @@ def improve_meta(page_title: str, page_url: str, content_excerpt: str,
         goal = ("This page earns impressions on Google but a weak click-through rate, so its "
                 "title and description must be more compelling and specific.")
 
-    prompt = f"""You are an SEO copywriter improving an EXISTING page's meta title and description.{_rules_block(rules)}
+    prompt = f"""You are an SEO copywriter improving an EXISTING page's meta title and description.{_rules_block(rules)}{_amend_block(instructions)}
 
 {META_GUIDE}
 
@@ -230,13 +246,13 @@ Respond with ONLY a JSON object, no preamble:
     }
 
 
-def correct_content(title: str, body_html: str, rules: str = "") -> dict:
+def correct_content(title: str, body_html: str, rules: str = "", instructions: str = "") -> dict:
     """Editorial cleanup of EXISTING content: strip em dashes, banned vocabulary,
     filler, and padding while PRESERVING meaning and every factual claim.
     Returns {"body_html": cleaned}."""
     prompt = f"""You are a careful copy editor. Rewrite the page content below to meet the
 writing standard, WITHOUT changing its meaning, facts, claims, or structure. Do not add
-new claims, statistics, or sections. Do not remove information. Only fix the writing.{_rules_block(rules)}
+new claims, statistics, or sections. Do not remove information. Only fix the writing.{_rules_block(rules)}{_amend_block(instructions)}
 {WRITING_STANDARD}
 
 Page title: {title}
@@ -268,7 +284,7 @@ def _strip_fences(text: str) -> str:
 
 
 def rewrite_page_html(site_name: str, page_url: str, page_title: str,
-                      current_html: str, rules: str = "") -> dict:
+                      current_html: str, rules: str = "", instructions: str = "") -> dict:
     """Full-page SEO rewrite of a single Elementor HTML-widget page body.
 
     These pages are one self-contained HTML document (fonts, <style>, nav, hero,
@@ -277,7 +293,7 @@ def rewrite_page_html(site_name: str, page_url: str, page_title: str,
 
     Returns {"html": full_rewritten_html, "summary": short_plain_summary}.
     """
-    prompt = f"""You are an expert SEO web copywriter and front-end developer improving ONE complete web page for a local business. You will receive the page's full HTML and return the COMPLETE improved HTML.{_rules_block(rules)}
+    prompt = f"""You are an expert SEO web copywriter and front-end developer improving ONE complete web page for a local business. You will receive the page's full HTML and return the COMPLETE improved HTML.{_rules_block(rules)}{_amend_block(instructions)}
 
 Business: {site_name}
 Page: {page_title} ({page_url})
@@ -403,13 +419,14 @@ Write 1-2 short paragraphs (about 60-110 words total) that tell the owner: how t
         return ""
 
 
-def generate_schema_jsonld(site_name: str, url: str, homepage_text: str) -> dict:
+def generate_schema_jsonld(site_name: str, url: str, homepage_text: str,
+                           instructions: str = "") -> dict:
     """Generate Organization/LocalBusiness JSON-LD from the homepage's real facts.
 
     Returns the parsed JSON-LD object (dict). Uses only ACTIVE schema types and
     NEVER invents facts (omits address/phone if not present in the page).
     """
-    prompt = f"""You are a structured-data expert. Produce ONE JSON-LD object describing this business, for injection on the homepage.
+    prompt = f"""You are a structured-data expert. Produce ONE JSON-LD object describing this business, for injection on the homepage.{_amend_block(instructions)}
 
 {SCHEMA_GUIDE}
 

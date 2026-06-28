@@ -19,24 +19,29 @@ from .content_standard import scan, strip_em_dashes
 from .database import SessionLocal
 from .models import Approval, JobRun, RunLog, Site, SiteChange
 from .rules import rules_for
+from .wordpress import WordPressClient
 
 P = "hostinger-ai-assistant"
 A_FIND = f"{P}/elementor-find-widgets"
 A_UPDATE_CONTENT = f"{P}/elementor-update-widget-content"
 A_PAGE_GET = f"{P}/pages-get"
 A_PAGE_UPDATE = f"{P}/pages-update"
-A_LIST_PAGES = f"{P}/elementor-list-pages"
 A_CACHE_FLUSH = f"{P}/litespeed-cache-flush"
 
 
 # -- reads -------------------------------------------------------------------
 def list_elementor_pages(conn: dict) -> list[dict]:
-    """Published Elementor pages for the Website tab (best-effort)."""
-    client = AbilitiesClient(conn["url"], conn["username"], conn["app_password"])
+    """Published pages for the Website tab (best-effort).
+
+    There is no `elementor-list-pages` ability (it isn't in the catalog), so we
+    list published pages through the standard WordPress REST adapter instead —
+    every Meridian page is an Elementor page, and this is the reliable source.
+    """
     try:
-        res = client.read(A_LIST_PAGES, {"post_type": "page", "post_status": "publish", "limit": 50})
-        return (res or {}).get("pages") or []
-    except (AbilitiesError, AbilitiesUnavailable):
+        wp = WordPressClient(conn["url"], conn["username"], conn["app_password"])
+        return [{"id": it["id"], "title": it.get("title", "")}
+                for it in wp.list_content(kinds=("pages",), limit=50) if it.get("id")]
+    except Exception:
         return []
 
 
@@ -64,30 +69,57 @@ def _set_widget_html(nodes, widget_id: str, html: str) -> bool:
     return False
 
 
-def apply_html(client: AbilitiesClient, page_id: int, widget_id: str, html: str) -> str:
-    """Write HTML into the page's html widget. Returns the method used.
+def _elementor_data_of(page: dict) -> str:
+    """Read _elementor_data from a pages-get result, tolerating shape variants
+    (under `meta`, or at the top level)."""
+    page = page or {}
+    meta = page.get("meta") or {}
+    return meta.get("_elementor_data") or page.get("_elementor_data") or ""
 
-    Tries the dedicated widget-content ability first (atomic, preserves other
-    settings). If that ability rejects html widgets, falls back to a surgical
-    edit of just this widget's node inside _elementor_data. Both are reversible
-    via the saved snapshot. Best-effort cache flush after.
+
+def _apply_via_elementor_data(client: AbilitiesClient, page_id: int, widget_id: str, html: str) -> None:
+    """Surgically set ONE widget's settings.html inside _elementor_data and save.
+
+    This is the real write path for Meridian's single-html-widget pages, because
+    the catalog's `elementor-update-widget-content` only edits text/heading/button
+    widgets (it no-ops on `html` widgets)."""
+    page = client.read(A_PAGE_GET, {"id": page_id})
+    data_str = _elementor_data_of(page)
+    if not data_str:
+        raise AbilitiesError("Could not read _elementor_data to edit the page body.")
+    try:
+        data = json.loads(data_str)
+    except (ValueError, TypeError) as exc:
+        raise AbilitiesError(f"Page Elementor data is not valid JSON; not editing: {exc}")
+    if not _set_widget_html(data, widget_id, html):
+        raise AbilitiesError(f"Widget {widget_id} not found in the page's Elementor data.")
+    client.run(A_PAGE_UPDATE, {"id": page_id, "meta": {"_elementor_data": json.dumps(data, ensure_ascii=False)}})
+
+
+def apply_html(client: AbilitiesClient, page_id: int, widget_id: str, html: str,
+               old_html: str | None = None) -> str:
+    """Write HTML into the page's html widget. Returns the method actually used.
+
+    Tries the dedicated widget-content ability first, but then CONFIRMS the change
+    is live — that ability silently no-ops on `html` widgets (returns HTTP 200 yet
+    changes nothing), which previously made writes vanish without error. If it did
+    not land (or errored), we do a surgical edit of just this widget's node inside
+    `_elementor_data`, which is the reliable path for these pages. Both are
+    reversible via the caller's snapshot. Best-effort cache flush after.
+
+    Pass `old_html` so the landed-check can look for the precise change (not just a
+    head sample that never moves); without it we sample the body.
     """
     method = "widget-content"
+    landed = False
     try:
         client.run(A_UPDATE_CONTENT, {"post_id": page_id, "widget_id": widget_id, "content": html})
-    except AbilitiesError:
+        landed = _change_is_live(client, page_id, html, old_html)
+    except (AbilitiesError, AbilitiesUnavailable):
+        landed = False
+    if not landed:
         method = "elementor-data"
-        page = client.read(A_PAGE_GET, {"id": page_id})
-        data_str = (((page or {}).get("meta") or {}).get("_elementor_data")) or ""
-        if not data_str:
-            raise AbilitiesError("Could not read _elementor_data to edit the page body.")
-        try:
-            data = json.loads(data_str)
-        except (ValueError, TypeError) as exc:
-            raise AbilitiesError(f"Page Elementor data is not valid JSON; not editing: {exc}")
-        if not _set_widget_html(data, widget_id, html):
-            raise AbilitiesError(f"Widget {widget_id} not found in the page's Elementor data.")
-        client.run(A_PAGE_UPDATE, {"id": page_id, "meta": {"_elementor_data": json.dumps(data)}})
+        _apply_via_elementor_data(client, page_id, widget_id, html)
     try:
         client.run(A_CACHE_FLUSH, {})
     except (AbilitiesError, AbilitiesUnavailable):
@@ -95,14 +127,63 @@ def apply_html(client: AbilitiesClient, page_id: int, widget_id: str, html: str)
     return method
 
 
-def verify_html(client: AbilitiesClient, page_id: int, expected_html: str) -> bool:
-    """Re-read the page's html widget and confirm the new content is live."""
+def _distinct_fragments(old_html: str, new_html: str, k: int = 3, minlen: int = 20) -> list[str]:
+    """Up to k substrings present in new_html but NOT in old_html — fingerprints of
+    the change, used to prove it actually landed on the live page."""
+    old_html, new_html = old_html or "", new_html or ""
+    if len(old_html) > 200000 or len(new_html) > 200000:
+        # Too large to diff cheaply: use a trailing chunk, but only if it's genuinely
+        # new (a shared/unchanged tail is no proof the change landed).
+        tail = new_html.strip()[-200:]
+        return [tail] if len(tail) >= minlen and tail not in old_html else []
+    frags: list[str] = []
+    for tag, _i1, _i2, j1, j2 in difflib.SequenceMatcher(None, old_html, new_html, autojunk=False).get_opcodes():
+        if tag in ("insert", "replace"):
+            seg = new_html[j1:j2].strip()
+            if len(seg) >= minlen:
+                frags.append(seg[:120])
+    frags.sort(key=len, reverse=True)
+    return frags[:k]
+
+
+def _change_is_live(client: AbilitiesClient, page_id: int,
+                    new_html: str, old_html: str | None = None) -> bool:
+    """Re-read the page's html widget and decide whether the change is actually live.
+
+    Robust against the two failure modes the old check missed: (1) an unchanged page
+    falsely passing because only the first 400 chars were sampled, and (2) a real but
+    deep/appended change (image dims mid-document, schema appended at the end) never
+    being looked at."""
     try:
         _wid, live = _find_html_widget(client, page_id)
     except (AbilitiesError, AbilitiesUnavailable):
         return False
-    sample = (expected_html or "")[:400].strip()
-    return bool(sample) and sample in (live or "")
+    if not live:
+        return False
+    live_s, new_s = live.strip(), (new_html or "").strip()
+    if not new_s:
+        return False
+    if live_s == new_s:
+        return True
+    if old_html is not None and live_s == (old_html or "").strip():
+        return False  # still exactly the old content — definitively did not land
+    frags = _distinct_fragments(old_html or "", new_s)
+    if frags:
+        return all(f in live for f in frags)
+    # No baseline / no detectable additions: sample the body, not just the head.
+    mid = new_s[len(new_s) // 2: len(new_s) // 2 + 200].strip() or new_s[:200].strip()
+    return bool(mid) and mid in live
+
+
+def verify_change(client: AbilitiesClient, page_id: int,
+                  old_html: str, new_html: str) -> bool:
+    """True if the page's html widget now reflects new_html (given it was old_html)."""
+    return _change_is_live(client, page_id, new_html, old_html)
+
+
+def verify_html(client: AbilitiesClient, page_id: int, expected_html: str) -> bool:
+    """Back-compat shim: confirm expected_html is live (no baseline available)."""
+    return _change_is_live(client, page_id, expected_html, None)
 
 
 # -- copy diff (for the approval) --------------------------------------------

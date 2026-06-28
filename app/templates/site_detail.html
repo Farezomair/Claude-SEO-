@@ -197,10 +197,40 @@
             <pre style="border:1px solid var(--border); border-radius:8px; padding:14px; margin-top:10px; max-height:340px; overflow:auto; background:#0f1219; color:#cbd5e1; font-size:12px; white-space:pre-wrap;">{{ item.code }}</pre>
           </details>
         {% endif %}
-        <div style="display:flex; gap:8px; margin-top:14px;">
-          <form method="post" action="/approvals/{{ item.approval.id }}/approve"><button class="btn" type="submit">Approve</button></form>
-          <form method="post" action="/approvals/{{ item.approval.id }}/reject"><button class="btn secondary" type="submit">Reject</button></form>
+        {% set k = item.approval.kind %}
+        {% set rt = '/sites/' ~ item.site.id %}
+        {% if item.approval.amend_note %}
+          <p class="muted" style="margin:10px 0 0; color:var(--accent);">{{ item.approval.amend_note }}</p>
+        {% endif %}
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:14px;">
+          {% if k in ['content', 'required_page'] %}
+            <form method="post" action="/approvals/{{ item.approval.id }}/approve">
+              <input type="hidden" name="publish" value="1"><input type="hidden" name="return_to" value="{{ rt }}">
+              <button class="btn" type="submit">Approve &amp; publish live</button></form>
+            <form method="post" action="/approvals/{{ item.approval.id }}/approve">
+              <input type="hidden" name="publish" value="0"><input type="hidden" name="return_to" value="{{ rt }}">
+              <button class="btn secondary" type="submit">Approve &amp; save as draft</button></form>
+          {% else %}
+            <form method="post" action="/approvals/{{ item.approval.id }}/approve">
+              <input type="hidden" name="publish" value="1"><input type="hidden" name="return_to" value="{{ rt }}">
+              <button class="btn" type="submit">Approve &amp; apply live</button></form>
+          {% endif %}
+          <form method="post" action="/approvals/{{ item.approval.id }}/reject">
+            <input type="hidden" name="return_to" value="{{ rt }}">
+            <button class="btn secondary" type="submit">Reject</button></form>
         </div>
+        {% if k in ['content', 'required_page', 'content_fix', 'meta_rewrite', 'page_rewrite', 'schema_inject'] %}
+        <details style="margin-top:10px;">
+          <summary style="cursor:pointer; color:var(--accent);">Request amendment</summary>
+          <form method="post" action="/approvals/{{ item.approval.id }}/amend" style="margin-top:8px;">
+            <input type="hidden" name="return_to" value="{{ rt }}">
+            <textarea name="instructions" rows="3" required
+              placeholder="Tell the AI what to change — e.g. 'warmer tone and mention our 10-year warranty', 'shorter title', 'drop the FAQ section'…"
+              style="width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--border); border-radius:8px; background:#0f1219; color:#e5e7eb; font:inherit;"></textarea>
+            <button class="btn small" type="submit" style="margin-top:8px;">Send to AI &amp; regenerate</button>
+          </form>
+        </details>
+        {% endif %}
       </div>
       {% endfor %}
     </div>

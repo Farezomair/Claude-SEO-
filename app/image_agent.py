@@ -21,8 +21,11 @@ from .models import Approval, JobRun, RunLog, Site, SiteChange
 
 IMG_RE = re.compile(r"<img\b[^>]*>", re.I)
 SRC_RE = re.compile(r"""\bsrc\s*=\s*["']([^"']+)["']""", re.I)
-HAS_W = re.compile(r"\bwidth\s*=", re.I)
-HAS_H = re.compile(r"\bheight\s*=", re.I)
+# Require a leading space so `data-width=` / `data-height=` (and CSS `max-width:`)
+# don't count as a real width/height attribute — otherwise we'd skip images that
+# actually still need dimensions and the CLS fix would be a silent no-op.
+HAS_W = re.compile(r"\swidth\s*=", re.I)
+HAS_H = re.compile(r"\sheight\s*=", re.I)
 MAX_IMAGES = 8          # bounded so a page's images can't stall the run
 FETCH_BYTES = 200_000
 PER_IMAGE_TIMEOUT = 4.0
@@ -164,8 +167,11 @@ def run_image_dims(site_id: int, run_id: int, conn: dict, page_id: int, page_tit
             title=f"Set dimensions on {len(sizes)} image(s): {page_title or page_id}",
             summary=f"Adds width/height to {len(sizes)} image(s) to stop layout shift (CLS). "
                     "No visual change; one-click revert.",
+            # Keep `sizes` so approve can re-apply against the LIVE page (avoids
+            # clobbering any other change made to the same widget since proposing).
             payload=__import__("json").dumps({"change_id": change.id, "page_id": page_id,
-                                              "widget_id": widget_id, "count": len(sizes)}),
+                                              "widget_id": widget_id, "count": len(sizes),
+                                              "sizes": sizes}),
             status="pending",
         ))
         run.status = "completed"

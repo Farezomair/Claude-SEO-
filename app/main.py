@@ -37,10 +37,12 @@ from .onpage_agent import start_meta_rewrites_async
 from .seo_technical import start_dedupe_async, start_metafix_async
 from .website_agent import start_change_async, start_page_drafts_async
 from .elementor_agent import (
-    apply_html, copy_diff, list_elementor_pages, start_page_rewrite_async, verify_html,
+    apply_html, copy_diff, list_elementor_pages, start_page_rewrite_async,
+    verify_change, verify_html, _find_html_widget,
 )
 from .weekly import start_weekly_async
 from .dispatcher import start_dispatch_async
+from .amend import start_amend_async
 from .wordpress import YOAST_DESC_KEY, YOAST_TITLE_KEY, WordPressClient, WordPressError
 from .abilities import AbilitiesClient, AbilitiesError, AbilitiesUnavailable
 
@@ -70,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "stop-button-25"
+BUILD = "writepath-publish-amend-26"
 
 
 @app.get("/version")
@@ -655,15 +657,27 @@ def revert_change(site_id: int, change_id: int, request: Request, db: Session = 
     conn = get_connection(site_id, site.url, site.name)
     if conn:
         try:
+            reverted_ok = True
             if change.kind in ("page_rewrite", "schema_inject", "img_dims"):
                 client = AbilitiesClient(conn["url"], conn["username"], conn["app_password"])
-                apply_html(client, change.target_page_id, change.target_widget_id, change.old_css)
+                apply_html(client, change.target_page_id, change.target_widget_id, change.old_css,
+                           old_html=change.css)
+                reverted_ok = verify_change(client, change.target_page_id, change.css, change.old_css)
             else:
                 WordPressClient(conn["url"], conn["username"], conn["app_password"]).update_custom_css(change.old_css)
+            if not reverted_ok:
+                # Don't tell the owner it's back to normal if we can't confirm it live.
+                db.add(RunLog(site_id=site_id,
+                              message=f"Revert wrote but couldn't confirm it live (still 'applied'): {change.request[:80]}"))
+                db.commit()
+                return RedirectResponse(f"/sites/{site_id}?tab=website&notice=revert_fail", status_code=303)
             change.status = "reverted"
             db.add(RunLog(site_id=site_id, message=f"Reverted change: {change.request[:80]}"))
             db.commit()
-        except (WordPressError, AbilitiesError, AbilitiesUnavailable):
+        except Exception as exc:  # incl. raw httpx transport errors — never 500 a revert
+            db.add(RunLog(site_id=site_id,
+                          message=f"Revert failed for “{change.request[:60]}”: {exc.__class__.__name__}"))
+            db.commit()
             return RedirectResponse(f"/sites/{site_id}?tab=website&notice=revert_fail", status_code=303)
     return RedirectResponse(f"/sites/{site_id}?tab=website&notice=reverted", status_code=303)
 
@@ -998,11 +1012,8 @@ def elementor_probe(site_id: int, request: Request, page_id: int = 0,
     P = "hostinger-ai-assistant"
     WIDGET_TYPES = ["heading", "text-editor", "button", "html", "image", "icon-box", "icon-list"]
     out: dict = {}
-    try:
-        out["list_pages"] = client.read(f"{P}/elementor-list-pages",
-                                        {"post_type": "page", "post_status": "publish", "limit": 30})
-    except (AbilitiesError, AbilitiesUnavailable) as exc:
-        return JSONResponse({"error": f"list-pages failed: {exc}"}, status_code=200)
+    # There is no `elementor-list-pages` ability; list published pages via REST.
+    out["list_pages"] = list_elementor_pages(conn)
 
     def inspect(pid: int) -> dict:
         res: dict = {}
@@ -1124,13 +1135,25 @@ def finding_snooze(finding_id: int, request: Request, db: Session = Depends(get_
     return RedirectResponse("/approvals?notice=task_snoozed", status_code=303)
 
 
+def _safe_return(return_to: str, default: str = "/approvals") -> str:
+    """Only allow same-site relative redirects (never an open redirect)."""
+    rt = (return_to or "").strip()
+    return rt if (rt.startswith("/") and not rt.startswith("//")) else default
+
+
+def _with_notice(url: str, notice: str) -> str:
+    return f"{url}{'&' if '?' in url else '?'}notice={notice}"
+
+
 @app.post("/approvals/{approval_id}/approve")
-def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
+def approve(approval_id: int, request: Request, publish: int = Form(0),
+            return_to: str = Form(""), db: Session = Depends(get_db)):
     if not current_user(request):
         return RedirectResponse("/login", status_code=303)
+    ret = _safe_return(return_to)
     appr = db.get(Approval, approval_id)
     if not appr or appr.status != "pending":
-        return RedirectResponse("/approvals", status_code=303)
+        return RedirectResponse(ret, status_code=303)
 
     site = db.get(Site, appr.site_id)
     if appr.kind == "content":
@@ -1138,17 +1161,16 @@ def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
         content = db.get(Content, payload.get("content_id"))
         conn = get_connection(site.id, site.url, site.name)
         if not conn:
-            return RedirectResponse("/approvals?notice=no_connection", status_code=303)
+            return RedirectResponse(_with_notice(ret, "no_connection"), status_code=303)
+        status = "publish" if publish else CONTENT_PUBLISH_STATUS
         try:
             wp = WordPressClient(conn["url"], conn["username"], conn["app_password"])
-            result = wp.create_post(
-                content.title, content.body, status=CONTENT_PUBLISH_STATUS, excerpt=appr.summary
-            )
+            result = wp.create_post(content.title, content.body, status=status, excerpt=appr.summary)
         except WordPressError as exc:
             db.add(RunLog(site_id=site.id, message=f"Publish failed for “{appr.title}”: {exc}"))
             db.commit()
-            return RedirectResponse("/approvals?notice=publish_fail", status_code=303)
-        content.status = "published" if CONTENT_PUBLISH_STATUS == "publish" else "in_wordpress_draft"
+            return RedirectResponse(_with_notice(ret, "publish_fail"), status_code=303)
+        content.status = "published" if status == "publish" else "in_wordpress_draft"
         db.add(RunLog(
             site_id=site.id,
             message=f"Approved & sent to WordPress ({result.get('status')}): {content.title} {result.get('link', '')}",
@@ -1158,7 +1180,7 @@ def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
         payload = json.loads(appr.payload or "{}")
         conn = get_connection(site.id, site.url, site.name)
         if not conn:
-            return RedirectResponse("/approvals?notice=no_connection", status_code=303)
+            return RedirectResponse(_with_notice(ret, "no_connection"), status_code=303)
         kind, page_id = payload.get("page_kind", "posts"), payload.get("page_id")
         new_title, new_desc = payload.get("new_title", ""), payload.get("new_desc", "")
         try:
@@ -1177,7 +1199,7 @@ def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
         except WordPressError as exc:
             db.add(RunLog(site_id=site.id, message=f"Meta rewrite failed for “{appr.title}”: {exc}"))
             db.commit()
-            return RedirectResponse("/approvals?notice=publish_fail", status_code=303)
+            return RedirectResponse(_with_notice(ret, "publish_fail"), status_code=303)
         _flush_cache(conn)
         finding = db.get(Finding, payload.get("finding_id"))
         if finding:
@@ -1197,7 +1219,7 @@ def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
         content = db.get(Content, payload.get("content_id"))
         conn = get_connection(site.id, site.url, site.name)
         if not conn or not content:
-            return RedirectResponse("/approvals?notice=no_connection", status_code=303)
+            return RedirectResponse(_with_notice(ret, "no_connection"), status_code=303)
         kind, page_id = payload.get("page_kind", "posts"), payload.get("page_id")
         try:
             wp = WordPressClient(conn["url"], conn["username"], conn["app_password"])
@@ -1211,7 +1233,7 @@ def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
         except WordPressError as exc:
             db.add(RunLog(site_id=site.id, message=f"Content cleanup failed for “{appr.title}”: {exc}"))
             db.commit()
-            return RedirectResponse("/approvals?notice=publish_fail", status_code=303)
+            return RedirectResponse(_with_notice(ret, "publish_fail"), status_code=303)
         _flush_cache(conn)
         after_clean = scan(content.body)
         db.add(FixRecord(
@@ -1230,26 +1252,31 @@ def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
         content = db.get(Content, payload.get("content_id"))
         conn = get_connection(site.id, site.url, site.name)
         if not conn or not content:
-            return RedirectResponse("/approvals?notice=no_connection", status_code=303)
+            return RedirectResponse(_with_notice(ret, "no_connection"), status_code=303)
+        status = "publish" if publish else "draft"
         try:
             wp = WordPressClient(conn["url"], conn["username"], conn["app_password"])
-            result = wp.create_page(content.title, content.body, status="draft")
+            result = wp.create_page(content.title, content.body, status=status)
         except WordPressError as exc:
             db.add(RunLog(site_id=site.id, message=f"Page create failed for “{appr.title}”: {exc}"))
             db.commit()
-            return RedirectResponse("/approvals?notice=publish_fail", status_code=303)
-        content.status = "in_wordpress_draft"
-        finding = db.get(Finding, payload.get("finding_id"))
-        if finding:
-            finding.status = "closed"
-        db.add(RunLog(site_id=site.id, message=f"Created page (draft) in WordPress: {content.title} {result.get('link', '')}"))
+            return RedirectResponse(_with_notice(ret, "publish_fail"), status_code=303)
+        content.status = "published" if status == "publish" else "in_wordpress_draft"
+        # A draft page still 404s for visitors and the crawler, so only clear the
+        # finding when it's actually published live; a draft re-surfaces next audit.
+        if publish:
+            finding = db.get(Finding, payload.get("finding_id"))
+            if finding:
+                finding.status = "closed"
+        db.add(RunLog(site_id=site.id,
+                      message=f"Created page ({status}) in WordPress: {content.title} {result.get('link', '')}"))
 
     elif appr.kind == "website_css":
         payload = json.loads(appr.payload or "{}")
         change = db.get(SiteChange, payload.get("change_id"))
         conn = get_connection(site.id, site.url, site.name)
         if not conn or not change:
-            return RedirectResponse("/approvals?notice=no_connection", status_code=303)
+            return RedirectResponse(_with_notice(ret, "no_connection"), status_code=303)
         try:
             wp = WordPressClient(conn["url"], conn["username"], conn["app_password"])
             change.old_css = wp.get_custom_css()  # back up the actual current CSS now
@@ -1258,7 +1285,7 @@ def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
             change.status = "failed"
             db.add(RunLog(site_id=site.id, message=f"Website change failed for “{appr.title}”: {exc}"))
             db.commit()
-            return RedirectResponse("/approvals?notice=publish_fail", status_code=303)
+            return RedirectResponse(_with_notice(ret, "publish_fail"), status_code=303)
         _flush_cache(conn)
         change.status = "applied"
         db.add(RunLog(site_id=site.id, message=f"Applied website change: {change.request[:80]}"))
@@ -1268,18 +1295,23 @@ def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
         change = db.get(SiteChange, payload.get("change_id"))
         conn = get_connection(site.id, site.url, site.name)
         if not conn or not change:
-            return RedirectResponse("/approvals?notice=no_connection", status_code=303)
+            return RedirectResponse(_with_notice(ret, "no_connection"), status_code=303)
         page_id = change.target_page_id or payload.get("page_id")
         widget_id = change.target_widget_id or payload.get("widget_id")
         client = AbilitiesClient(conn["url"], conn["username"], conn["app_password"])
         try:
-            method = apply_html(client, page_id, widget_id, change.css)
+            # Snapshot the LIVE body now so revert restores the true pre-change page,
+            # not a stale propose-time copy.
+            _wid, live = _find_html_widget(client, page_id)
+            if live:
+                change.old_css = live
+            method = apply_html(client, page_id, widget_id, change.css, old_html=change.old_css)
         except (AbilitiesError, AbilitiesUnavailable) as exc:
             change.status = "failed"
             db.add(RunLog(site_id=site.id, message=f"Page rewrite failed for “{appr.title}”: {exc}"))
             db.commit()
-            return RedirectResponse("/approvals?notice=publish_fail", status_code=303)
-        verified = verify_html(client, page_id, change.css)
+            return RedirectResponse(_with_notice(ret, "publish_fail"), status_code=303)
+        verified = verify_change(client, page_id, change.old_css, change.css)
         change.status = "applied"
         db.add(FixRecord(
             site_id=site.id, doer="Elementor On-page",
@@ -1300,24 +1332,39 @@ def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
         change = db.get(SiteChange, payload.get("change_id"))
         conn = get_connection(site.id, site.url, site.name)
         if not conn or not change:
-            return RedirectResponse("/approvals?notice=no_connection", status_code=303)
+            return RedirectResponse(_with_notice(ret, "no_connection"), status_code=303)
         page_id = change.target_page_id or payload.get("page_id")
         widget_id = change.target_widget_id or payload.get("widget_id")
         client = AbilitiesClient(conn["url"], conn["username"], conn["app_password"])
+        jstr = payload.get("jsonld", "")
         try:
-            method = apply_html(client, page_id, widget_id, change.css)
+            # Re-read live and layer the schema onto CURRENT content, so we don't
+            # clobber other edits (e.g. image dimensions) on the same html widget.
+            _wid, live = _find_html_widget(client, page_id)
+            if live:
+                from .schema_agent import _has_entity_schema
+                change.old_css = live
+                if jstr and not _has_entity_schema(live):
+                    change.css = live + f'\n<script type="application/ld+json">\n{jstr}\n</script>\n'
+                else:
+                    change.css = live  # already has entity schema / nothing to add — no-op write
+            method = apply_html(client, page_id, widget_id, change.css, old_html=change.old_css)
         except (AbilitiesError, AbilitiesUnavailable) as exc:
             change.status = "failed"
             db.add(RunLog(site_id=site.id, message=f"Schema injection failed for “{appr.title}”: {exc}"))
             db.commit()
-            return RedirectResponse("/approvals?notice=publish_fail", status_code=303)
-        verified = "application/ld+json" in (change.css or "")
+            return RedirectResponse(_with_notice(ret, "publish_fail"), status_code=303)
+        # Real verification: confirm the JSON-LD is actually on the live page now —
+        # not just that we built a string containing it. verify_change re-reads the
+        # live widget and looks for the appended <script>, which is the distinct change.
+        verified = bool(jstr) and verify_change(client, page_id, change.old_css, change.css)
         change.status = "applied"
-        for f in db.query(Finding).filter(
-                Finding.site_id == site.id,
-                Finding.category.in_(("no_entity_schema", "no_localbusiness_schema")),
-                Finding.status.in_(("open", "in-progress"))).all():
-            f.status = "closed"
+        if verified:
+            for f in db.query(Finding).filter(
+                    Finding.site_id == site.id,
+                    Finding.category.in_(("no_entity_schema", "no_localbusiness_schema")),
+                    Finding.status.in_(("open", "in-progress"))).all():
+                f.status = "closed"
         db.add(FixRecord(
             site_id=site.id, doer="SEO Technical",
             action_taken=f"Injected homepage entity schema (via {method})",
@@ -1326,32 +1373,45 @@ def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
             method="gate-approved", lane="gated", applied=True,
             verification_verdict="verified" if verified else "not_fixed", status="done",
         ))
-        db.add(RunLog(site_id=site.id, message=f"Applied homepage schema: {appr.title}"))
+        db.add(RunLog(site_id=site.id,
+                      message=f"Applied homepage schema: {appr.title} "
+                              f"({'verified live' if verified else 'apply ok, verify pending'})"))
 
     elif appr.kind == "img_dims":
+        from .image_agent import _add_dims
         payload = json.loads(appr.payload or "{}")
         change = db.get(SiteChange, payload.get("change_id"))
         conn = get_connection(site.id, site.url, site.name)
         if not conn or not change:
-            return RedirectResponse("/approvals?notice=no_connection", status_code=303)
+            return RedirectResponse(_with_notice(ret, "no_connection"), status_code=303)
         page_id = change.target_page_id or payload.get("page_id")
         widget_id = change.target_widget_id or payload.get("widget_id")
         client = AbilitiesClient(conn["url"], conn["username"], conn["app_password"])
+        sizes = payload.get("sizes") or {}
         try:
-            method = apply_html(client, page_id, widget_id, change.css)
+            # Re-read live and re-inject dimensions into CURRENT content, snapshotting
+            # a true revert point (avoids clobbering other same-widget edits).
+            _wid, live = _find_html_widget(client, page_id)
+            if live:
+                change.old_css = live
+                # Re-derive against live; with no stored sizes (legacy proposal) write
+                # live back unchanged rather than the stale propose-time snapshot.
+                change.css = _add_dims(live, sizes) if sizes else live
+            method = apply_html(client, page_id, widget_id, change.css, old_html=change.old_css)
         except (AbilitiesError, AbilitiesUnavailable) as exc:
             change.status = "failed"
             db.add(RunLog(site_id=site.id, message=f"Image-dimension fix failed for “{appr.title}”: {exc}"))
             db.commit()
-            return RedirectResponse("/approvals?notice=publish_fail", status_code=303)
-        verified = verify_html(client, page_id, change.css)
+            return RedirectResponse(_with_notice(ret, "publish_fail"), status_code=303)
+        verified = verify_change(client, page_id, change.old_css, change.css)
         change.status = "applied"
-        # Close the in-progress image-dimension finding(s); any still missing on
-        # other pages re-detect on the next audit.
-        for f in db.query(Finding).filter(
-                Finding.site_id == site.id, Finding.category == "image_no_dimensions",
-                Finding.status == "in-progress").all():
-            f.status = "closed"
+        # Close the in-progress image-dimension finding(s) only when verified live;
+        # any still missing on other pages re-detect on the next audit.
+        if verified:
+            for f in db.query(Finding).filter(
+                    Finding.site_id == site.id, Finding.category == "image_no_dimensions",
+                    Finding.status == "in-progress").all():
+                f.status = "closed"
         db.add(FixRecord(
             site_id=site.id, doer="Website Agent",
             action_taken=f"Added image dimensions ({payload.get('count', '?')} images, via {method})",
@@ -1360,21 +1420,25 @@ def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
             method="gate-approved", lane="gated", applied=True,
             verification_verdict="verified" if verified else "not_fixed", status="done",
         ))
-        db.add(RunLog(site_id=site.id, message=f"Applied image dimensions: {appr.title}"))
+        db.add(RunLog(site_id=site.id,
+                      message=f"Applied image dimensions: {appr.title} "
+                              f"({'verified live' if verified else 'apply ok, verify pending'})"))
 
     appr.status = "approved"
     appr.decided_at = utcnow()
     db.commit()
-    return RedirectResponse("/approvals?notice=approved", status_code=303)
+    return RedirectResponse(_with_notice(ret, "approved"), status_code=303)
 
 
 @app.post("/approvals/{approval_id}/reject")
-def reject(approval_id: int, request: Request, db: Session = Depends(get_db)):
+def reject(approval_id: int, request: Request, return_to: str = Form(""),
+           db: Session = Depends(get_db)):
     if not current_user(request):
         return RedirectResponse("/login", status_code=303)
+    ret = _safe_return(return_to)
     appr = db.get(Approval, approval_id)
     if not appr or appr.status != "pending":
-        return RedirectResponse("/approvals", status_code=303)
+        return RedirectResponse(ret, status_code=303)
     try:
         payload = json.loads(appr.payload or "{}")
     except Exception:
@@ -1398,7 +1462,26 @@ def reject(approval_id: int, request: Request, db: Session = Depends(get_db)):
     appr.status = "rejected"
     appr.decided_at = utcnow()
     db.commit()
-    return RedirectResponse("/approvals?notice=rejected", status_code=303)
+    return RedirectResponse(_with_notice(ret, "rejected"), status_code=303)
+
+
+@app.post("/approvals/{approval_id}/amend")
+def amend(approval_id: int, request: Request, instructions: str = Form(""),
+          return_to: str = Form(""), db: Session = Depends(get_db)):
+    """Owner asks the AI to revise a proposal ('Request amendment'). Regenerates the
+    proposal in the background with their feedback; it stays pending for re-review."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    ret = _safe_return(return_to)
+    appr = db.get(Approval, approval_id)
+    instructions = (instructions or "").strip()
+    if not appr or appr.status != "pending" or not instructions:
+        return RedirectResponse(_with_notice(ret, "amend_empty" if appr else "rejected"), status_code=303)
+    appr.amend_note = "⏳ Reworking this with your changes — refresh in a moment…"
+    db.add(RunLog(site_id=appr.site_id, message=f"Amendment requested for “{appr.title}”: {instructions[:160]}"))
+    db.commit()
+    start_amend_async(approval_id, instructions)
+    return RedirectResponse(_with_notice(ret, "amending"), status_code=303)
 
 
 @app.post("/sites/{site_id}/connection")

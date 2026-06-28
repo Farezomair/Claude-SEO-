@@ -11,18 +11,65 @@ import threading
 
 from bs4 import BeautifulSoup
 
+import json as _json
+
 from .abilities import AbilitiesClient, AbilitiesError, AbilitiesUnavailable
 from .brain import generate_schema_jsonld
+from .crawler import LOCALBUSINESS_SUBTYPES
 from .database import SessionLocal
-from .elementor_agent import P, _find_html_widget
+from .elementor_agent import P, _find_html_widget, list_elementor_pages
 from .models import Approval, Finding, JobRun, RunLog, Site, SiteChange
 
 A_SETTINGS = f"{P}/wp-settings-get"
-A_LIST = f"{P}/elementor-list-pages"
 ENTITY_CATS = ("no_entity_schema", "no_localbusiness_schema")
 
 
-def _homepage_id(client: AbilitiesClient) -> int:
+def _iter_ld_objects(data):
+    """Yield JSON-LD objects from a parsed block, flattening @graph and lists."""
+    if isinstance(data, list):
+        for d in data:
+            yield from _iter_ld_objects(d)
+    elif isinstance(data, dict):
+        if isinstance(data.get("@graph"), list):
+            for d in data["@graph"]:
+                yield from _iter_ld_objects(d)
+        yield data
+
+
+def _looks_like_entity(obj: dict) -> bool:
+    t = obj.get("@type")
+    types = [x for x in (t if isinstance(t, list) else [t]) if isinstance(x, str)]
+    # Organization, anything with "Business" in the name, or a known LocalBusiness
+    # subtype (GeneralContractor/Dentist/Plumber…) even when no contact fields are present.
+    if any(x == "Organization" or "Business" in x or x.lower() in LOCALBUSINESS_SUBTYPES
+           for x in types):
+        return True
+    # Fallback: a typed object carrying business-identity fields.
+    if types and any(k in obj for k in
+                     ("telephone", "address", "areaServed", "openingHours", "openingHoursSpecification")):
+        return True
+    return False
+
+
+def _has_entity_schema(html: str) -> bool:
+    """True if the page already carries Organization/LocalBusiness JSON-LD.
+
+    Parses each ld+json block (instead of substring-matching), so it neither misses
+    LocalBusiness SUBTYPES nor false-fires on the word 'Business' in visible copy."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    for tag in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        raw = tag.string or tag.get_text() or ""
+        try:
+            data = _json.loads(raw)
+        except Exception:
+            continue
+        for obj in _iter_ld_objects(data):
+            if isinstance(obj, dict) and _looks_like_entity(obj):
+                return True
+    return False
+
+
+def _homepage_id(client: AbilitiesClient, conn: dict) -> int:
     """Best-effort: the front-page id from settings, else a page titled Home."""
     try:
         s = client.read(A_SETTINGS, {})
@@ -32,8 +79,7 @@ def _homepage_id(client: AbilitiesClient) -> int:
     except Exception:
         pass
     try:
-        res = client.read(A_LIST, {"post_type": "page", "post_status": "publish", "limit": 50})
-        pages = (res or {}).get("pages") or []
+        pages = list_elementor_pages(conn)
         for p in pages:
             if (p.get("title") or "").strip().lower() in ("homepage", "home"):
                 return int(p["id"])
@@ -64,7 +110,7 @@ def run_schema_inject(site_id: int, run_id: int, conn: dict) -> None:
             db.commit()
             return
 
-        pid = _homepage_id(client)
+        pid = _homepage_id(client, conn)
         if not pid:
             run.status = "failed"
             run.summary = "Could not identify the homepage to add schema to."
@@ -83,9 +129,8 @@ def run_schema_inject(site_id: int, run_id: int, conn: dict) -> None:
             db.commit()
             return
 
-        # Already has entity schema? Don't double-inject.
-        if "application/ld+json" in old_html and any(
-                t in old_html for t in ("LocalBusiness", '"Organization"', "Business")):
+        # Already has entity schema? Don't double-inject (parse, don't substring-match).
+        if _has_entity_schema(old_html):
             _close_entity_findings(db, site_id)
             run.status = "completed"
             run.summary = "Homepage already has entity schema — nothing to add."

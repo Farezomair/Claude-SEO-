@@ -137,6 +137,7 @@ class Approval(Base):
     summary = Column(Text, default="")
     payload = Column(Text, default="")              # JSON
     status = Column(String(20), default="pending")  # pending/approved/rejected
+    amend_note = Column(Text, nullable=True)        # transient "reworking…" / error note
     created_at = Column(DateTime, default=utcnow)
     decided_at = Column(DateTime, nullable=True)
 

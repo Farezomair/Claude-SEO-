@@ -39,6 +39,8 @@
   {% if notice == 'rejected' %}<div class="card"><p style="margin:0;" class="muted">Rejected and discarded.</p></div>{% endif %}
   {% if notice == 'no_connection' %}<div class="card"><div class="error">Can't publish — that site has no WordPress connection. Set it up in the site's Settings tab.</div></div>{% endif %}
   {% if notice == 'publish_fail' %}<div class="card"><div class="error">Approved, but sending to WordPress failed. Check the connection and try again.</div></div>{% endif %}
+  {% if notice == 'amending' %}<div class="card"><p style="margin:0; color:var(--accent);">Sent to the AI — your amendment is being written. Refresh in a moment to see the revised version.</p></div>{% endif %}
+  {% if notice == 'amend_empty' %}<div class="card"><div class="error">Tell the AI what to change first, then send.</div></div>{% endif %}
 
   {% if items %}
     {% for item in items %}
@@ -85,14 +87,39 @@
           <pre style="border:1px solid var(--border); border-radius:8px; padding:16px; margin-top:12px; max-height:360px; overflow:auto; background:#0f1219; color:#cbd5e1; font-size:12px; white-space:pre-wrap;">{{ item.preview_html }}</pre>
         </details>
       {% endif %}
-      <div style="display:flex; gap:8px; margin-top:16px;">
-        <form method="post" action="/approvals/{{ item.approval.id }}/approve">
-          <button class="btn" type="submit">Approve</button>
-        </form>
+      {% set k = item.approval.kind %}
+      {% if item.approval.amend_note %}
+        <p class="muted" style="margin:10px 0 0; color:var(--accent);">{{ item.approval.amend_note }}</p>
+      {% endif %}
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:16px;">
+        {% if k in ['content', 'required_page'] %}
+          <form method="post" action="/approvals/{{ item.approval.id }}/approve">
+            <input type="hidden" name="publish" value="1"><input type="hidden" name="return_to" value="/approvals">
+            <button class="btn" type="submit">Approve &amp; publish live</button></form>
+          <form method="post" action="/approvals/{{ item.approval.id }}/approve">
+            <input type="hidden" name="publish" value="0"><input type="hidden" name="return_to" value="/approvals">
+            <button class="btn secondary" type="submit">Approve &amp; save as draft</button></form>
+        {% else %}
+          <form method="post" action="/approvals/{{ item.approval.id }}/approve">
+            <input type="hidden" name="publish" value="1"><input type="hidden" name="return_to" value="/approvals">
+            <button class="btn" type="submit">Approve &amp; apply live</button></form>
+        {% endif %}
         <form method="post" action="/approvals/{{ item.approval.id }}/reject">
-          <button class="btn secondary" type="submit">Reject</button>
-        </form>
+          <input type="hidden" name="return_to" value="/approvals">
+          <button class="btn secondary" type="submit">Reject</button></form>
       </div>
+      {% if k in ['content', 'required_page', 'content_fix', 'meta_rewrite', 'page_rewrite', 'schema_inject'] %}
+      <details style="margin-top:10px;">
+        <summary style="cursor:pointer; color:var(--accent);">Request amendment</summary>
+        <form method="post" action="/approvals/{{ item.approval.id }}/amend" style="margin-top:8px;">
+          <input type="hidden" name="return_to" value="/approvals">
+          <textarea name="instructions" rows="3" required
+            placeholder="Tell the AI what to change — e.g. 'warmer tone and mention our 10-year warranty', 'shorter title', 'drop the FAQ section'…"
+            style="width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--border); border-radius:8px; background:#0f1219; color:#e5e7eb; font:inherit;"></textarea>
+          <button class="btn" type="submit" style="margin-top:8px;">Send to AI &amp; regenerate</button>
+        </form>
+      </details>
+      {% endif %}
     </div>
     {% endfor %}
   {% else %}
