@@ -30,7 +30,13 @@ from .wordpress import YOAST_DESC_KEY, YOAST_TITLE_KEY, WordPressClient, WordPre
 
 SEVERITY_RANK = {"blocker": 0, "critical": 1, "high": 2, "medium": 3, "low": 4}
 META_CATS = {"meta_title", "meta_description", "missing_title", "title_length", "meta_description_missing"}
-MAX_AUTO_FIXES = 25  # cap live auto-writes per run (each is a Claude call)
+# Findings that a full-page Elementor rewrite addresses (FAQ, quotable answers,
+# tables, deeper content, heading structure) — grounded in the EEAT+GEO knowledge.
+REWRITE_CATS = {"thin_content", "eeat_weak", "content_shallow", "content_stale",
+                "geo_unstructured", "heading_hierarchy", "missing_h1", "multiple_h1", "nap_missing"}
+REQUIRED_KEYWORDS = ("privacy", "terms", "tos", "about", "contact", "accessibility")
+MAX_AUTO_FIXES = 25   # cap live auto-writes per run (each is a Claude call)
+MAX_REWRITES = 3      # cap full-page rewrites per run (each is a big Claude call)
 
 # Honest "we can't auto-fix this yet" messages, per category. Points at the manual
 # tool where one already exists.
@@ -216,14 +222,66 @@ def _propose_schema(db, ctx, f):
     return ("open", "Couldn't generate schema this run (will retry).", False)
 
 
+def _propose_rewrite(db, ctx, f):
+    """Propose ONE full-page SEO rewrite per page — fixes FAQ/quotable answers/
+    tables/depth/headings together. Reuses the existing Elementor rewrite doer."""
+    items = ctx.get("items") or {}
+    item = items.get(_norm(f.evidence_url))
+    if not item:
+        return ("no-capability",
+                "Needs a content rewrite, but this URL isn't an editable Elementor page.", False)
+    pid, title = item["id"], item.get("title", "")
+    if pid in ctx["rewrite_pages"]:
+        return ("in-progress", "Covered by the full-page SEO rewrite proposed for this page (in Approvals).", False)
+    if _pending_payload_match(db, ctx["site"].id, "page_rewrite", "page_id", pid):
+        ctx["rewrite_pages"].add(pid)
+        return ("in-progress", "A full-page SEO rewrite for this page is already waiting in Approvals.", False)
+    if ctx["rewrites_used"] >= MAX_REWRITES:
+        return ("open", "Queued — full-page rewrite cap reached this run; will continue next run.", False)
+    from .elementor_agent import run_page_rewrite
+    sub = JobRun(site_id=ctx["site"].id, kind="elementor", status="running",
+                 summary=f"Rewriting {title or pid}…")
+    db.add(sub)
+    db.commit()
+    db.refresh(sub)
+    run_page_rewrite(ctx["site"].id, sub.id, ctx["conn"], pid, title)
+    if _pending_payload_match(db, ctx["site"].id, "page_rewrite", "page_id", pid):
+        ctx["rewrite_pages"].add(pid)
+        ctx["rewrites_used"] += 1
+        return ("in-progress",
+                "Proposed a full-page SEO rewrite (adds FAQ, quotable lead answers, tables, "
+                "fixes heading order, deepens content) → sent to Approvals.", False)
+    return ("no-capability", f"Couldn't rewrite this page: {sub.summary}", False)
+
+
+def _handle_broken(db, ctx, f):
+    """Broken link/page: required-page 404s are covered by the page drafts; external
+    bot-blocks are not real defects; otherwise we have no redirects doer yet."""
+    issue = (f.issue or "").lower()
+    path = urlparse(f.evidence_url or "").path.lower()
+    kw = next((k for k in REQUIRED_KEYWORDS if k in path), None)
+    if kw:
+        kw = "terms" if kw == "tos" else kw
+        return ("no-capability",
+                f"This 404 is the missing {kw} page — it clears once the {kw} page draft "
+                f"in Approvals is published.", False)
+    if "blocks automated checks" in issue or "403" in issue:
+        return ("no-capability",
+                "External link that blocks bots; it works for real visitors — no action needed.", False)
+    return ("no-capability", NO_CAP.get(f.category, "Broken link — needs a redirects doer (not built yet)."), False)
+
+
 HANDLERS = {
     **{c: _fix_meta for c in META_CATS},
+    **{c: _propose_rewrite for c in REWRITE_CATS},
     "required_page_missing": _propose_required_page,
     "duplicate_title": _propose_dedupe,
     "striking_distance": _propose_ranking,
     "low_ctr": _propose_ranking,
     "no_entity_schema": _propose_schema,
     "no_localbusiness_schema": _propose_schema,
+    "broken_link": _handle_broken,
+    "broken_page": _handle_broken,
 }
 
 
@@ -266,14 +324,15 @@ def dispatch_fixes(site_id: int, progress_run_id: int | None = None) -> dict:
         findings.sort(key=lambda x: (SEVERITY_RANK.get(x.severity, 5), x.category))
         total = len(findings)
 
-        ctx = {"site": site, "conn": conn, "auto_used": 0, "flush": False,
-               "schema_done": False, "wp": WordPressClient(conn["url"], conn["username"], conn["app_password"]),
+        ctx = {"site": site, "conn": conn, "auto_used": 0, "rewrites_used": 0, "flush": False,
+               "schema_done": False, "rewrite_pages": set(),
+               "wp": WordPressClient(conn["url"], conn["username"], conn["app_password"]),
                "items": None}
-        # Build the URL->page map once if any meta/title/ranking finding exists.
-        if any(f.category in META_CATS or f.category in ("duplicate_title", "striking_distance", "low_ctr")
-               for f in findings):
+        # Build the URL->page map once if any finding needs a page lookup.
+        lookup_cats = META_CATS | REWRITE_CATS | {"duplicate_title", "striking_distance", "low_ctr"}
+        if any(f.category in lookup_cats for f in findings):
             try:
-                ctx["items"] = {_norm(it["link"]): it for it in ctx["wp"].list_content(limit=60) if it.get("link")}
+                ctx["items"] = {_norm(it["link"]): it for it in ctx["wp"].list_content(limit=100) if it.get("link")}
             except Exception:
                 ctx["items"] = {}
 
