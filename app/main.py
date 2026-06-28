@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "writepath-publish-amend-26"
+BUILD = "writepath-selftest-27"
 
 
 @app.get("/version")
@@ -1034,6 +1034,97 @@ def elementor_probe(site_id: int, request: Request, page_id: int = 0,
     sample_ids = [page_id] if page_id else [22, 39, 12]
     out["inspected"] = {str(pid): inspect(pid) for pid in sample_ids}
     return JSONResponse(out)
+
+
+@app.get("/sites/{site_id}/write-test")
+def write_test(site_id: int, request: Request, page_id: int = 12, db: Session = Depends(get_db)):
+    """Safe write-path self-test: append an INVISIBLE HTML comment to a page's html
+    widget, check which write method actually lands (widget-content vs _elementor_data),
+    then auto-revert. Returns a per-step report. Net-zero, no visible change."""
+    import time as _time
+    from .elementor_agent import (
+        _find_html_widget, _elementor_data_of, _set_widget_html,
+        A_UPDATE_CONTENT, A_PAGE_GET, A_PAGE_UPDATE, A_CACHE_FLUSH)
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return JSONResponse({"error": "site not found"}, status_code=404)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return JSONResponse({"error": "no WordPress connection"}, status_code=400)
+    client = AbilitiesClient(conn["url"], conn["username"], conn["app_password"])
+    steps, result = [], {"page_id": page_id}
+
+    def step(name, fn):
+        try:
+            r = fn()
+            steps.append({"step": name, "ok": True})
+            return r
+        except Exception as e:
+            steps.append({"step": name, "ok": False, "error": f"{e.__class__.__name__}: {str(e)[:300]}"})
+            return None
+
+    wh = step("find_widget", lambda: _find_html_widget(client, page_id))
+    if not wh or not wh[0]:
+        return JSONResponse({"result": result, "steps": steps, "verdict": "no html widget found"})
+    widget_id, original = wh
+    result.update(widget_id=widget_id, orig_len=len(original))
+    token = f"<!-- ascend-write-test-{int(_time.time())} -->"
+    marked = original + token
+
+    step("widget_content_write", lambda: client.run(
+        A_UPDATE_CONTENT, {"post_id": page_id, "widget_id": widget_id, "content": marked}))
+    step("cache_flush_1", lambda: client.run(A_CACHE_FLUSH, {}))
+    live1 = step("reread_1", lambda: _find_html_widget(client, page_id)[1])
+    result["widget_content_works"] = bool(live1 and token in live1)
+
+    if not result["widget_content_works"]:
+        page = step("pages_get", lambda: client.read(A_PAGE_GET, {"id": page_id}))
+        ed = _elementor_data_of(page or {})
+        result["pages_get_returns_elementor_data"] = bool(ed)
+        result["elementor_data_len"] = len(ed) if ed else 0
+
+        def ed_write():
+            data = json.loads(ed)
+            if not _set_widget_html(data, widget_id, marked):
+                raise RuntimeError("widget id not present in _elementor_data")
+            return client.run(A_PAGE_UPDATE, {"id": page_id,
+                                              "meta": {"_elementor_data": json.dumps(data, ensure_ascii=False)}})
+        if ed:
+            step("elementor_data_write", ed_write)
+            step("cache_flush_2", lambda: client.run(A_CACHE_FLUSH, {}))
+            live2 = step("reread_2", lambda: _find_html_widget(client, page_id)[1])
+            result["elementor_data_works"] = bool(live2 and token in live2)
+
+    # Revert via whichever paths exist (best-effort), then confirm the marker is gone.
+    def revert():
+        try:
+            client.run(A_UPDATE_CONTENT, {"post_id": page_id, "widget_id": widget_id, "content": original})
+        except Exception:
+            pass
+        try:
+            page = client.read(A_PAGE_GET, {"id": page_id})
+            ed = _elementor_data_of(page or {})
+            if ed:
+                data = json.loads(ed)
+                _set_widget_html(data, widget_id, original)
+                client.run(A_PAGE_UPDATE, {"id": page_id,
+                                           "meta": {"_elementor_data": json.dumps(data, ensure_ascii=False)}})
+        except Exception:
+            pass
+        try:
+            client.run(A_CACHE_FLUSH, {})
+        except Exception:
+            pass
+        return True
+    step("revert", revert)
+    live3 = step("reread_after_revert", lambda: _find_html_widget(client, page_id)[1])
+    result["token_gone_after_revert"] = bool(live3 is not None and token not in (live3 or ""))
+    result["verdict"] = ("widget-content" if result.get("widget_content_works")
+                         else "elementor-data" if result.get("elementor_data_works")
+                         else "NO WRITE METHOD WORKS")
+    return JSONResponse({"result": result, "steps": steps})
 
 
 # --------------------------------------------------------------------------
