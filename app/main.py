@@ -70,7 +70,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "claude-timeout-21"
+BUILD = "single-screen-22"
 
 
 @app.get("/version")
@@ -307,7 +307,17 @@ def pipeline_status(site_id: int, request: Request, db: Session = Depends(get_db
         db.query(Report).filter(Report.site_id == site_id)
         .order_by(Report.created_at.desc()).first()
     )
-    return JSONResponse(_pipeline_state(run, report.id if report else None))
+    state = _pipeline_state(run, report.id if report else None)
+    # Live fix log: findings the dispatcher has worked (has a remark), newest first.
+    log = (
+        db.query(Finding)
+        .filter(Finding.site_id == site_id, Finding.remark.isnot(None))
+        .order_by(Finding.id.desc()).limit(15).all()
+    )
+    state["fix_log"] = [
+        {"issue": (f.issue or "")[:90], "status": f.status, "remark": f.remark} for f in log
+    ]
+    return JSONResponse(state)
 
 
 @app.get("/sites/{site_id}", response_class=HTMLResponse)
@@ -323,8 +333,8 @@ def site_detail(
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
         return RedirectResponse("/sites", status_code=303)
-    if tab not in {"command", "audit", "fixes", "content", "website", "reports", "settings"}:
-        tab = "command"
+    # Single-screen app: everything lives on the Command Center.
+    tab = "command"
 
     ctx = {
         "request": request,
@@ -382,6 +392,37 @@ def site_detail(
         _mark_stale(db, latest_fix)
         ctx["fix_running"] = bool(latest_fix and latest_fix.status == "running")
         ctx["latest_fix"] = latest_fix
+        ctx["latest_audit"] = latest_audit
+        ctx["narrative"] = latest_audit.narrative if latest_audit else ""
+        ctx["findings"] = (
+            db.query(Finding).filter(Finding.audit_id == latest_audit.id).all()
+            if latest_audit else []
+        )
+        # Improvement chart across past audits.
+        hist = (
+            db.query(Audit).filter(Audit.site_id == site_id, Audit.status == "completed")
+            .order_by(Audit.created_at.asc()).limit(12).all()
+        )
+        pts = []
+        for idx, a in enumerate(hist):
+            n = db.query(Finding).filter(Finding.audit_id == a.id).count()
+            fq = db.query(FixRecord).filter(
+                FixRecord.site_id == site_id, FixRecord.applied == True,  # noqa: E712
+                FixRecord.created_at >= a.created_at)
+            if idx + 1 < len(hist):
+                fq = fq.filter(FixRecord.created_at < hist[idx + 1].created_at)
+            pts.append({"date": a.created_at, "score": a.health_score or 0, "issues": n, "fixes": fq.count()})
+        ctx["chart"] = _build_chart(pts)
+        # Embedded Approvals + Settings panels.
+        _collapse_dupe_approvals(db)
+        ctx["approval_items"] = _approval_items(db, site_id)
+        ctx["human_tasks"] = _human_task_items(db, site_id)
+        ctx["connection"] = db.query(SiteConnection).filter(SiteConnection.site_id == site_id).first()
+        ctx["google"] = google_oauth.connection()
+        ctx["google_configured"] = google_oauth.configured()
+        ctx["scheduler_enabled"] = SCHEDULER_ENABLED
+        ctx["interval_days"] = INTERVAL_DAYS
+        ctx["pending_count"] = len(ctx["approval_items"])
 
     elif tab == "audit":
         latest_audit = (
@@ -971,46 +1012,37 @@ def elementor_probe(site_id: int, request: Request, page_id: int = 0,
 # --------------------------------------------------------------------------
 # Approvals (the safety gate)
 # --------------------------------------------------------------------------
-@app.get("/approvals", response_class=HTMLResponse)
-def approvals(request: Request, notice: str = "", db: Session = Depends(get_db)):
-    if not current_user(request):
-        return RedirectResponse("/login", status_code=303)
-    # Collapse duplicate pending approvals (same site + kind + title) — keep the
-    # newest, reject the rest — so re-runs don't show the same item many times.
-    dupes = (
-        db.query(Approval).filter(Approval.status == "pending")
-        .order_by(Approval.created_at.desc()).all()
-    )
-    seen_keys: set = set()
-    collapsed = False
+def _collapse_dupe_approvals(db) -> None:
+    """Keep the newest pending approval per (site, kind, title); supersede the rest."""
+    dupes = (db.query(Approval).filter(Approval.status == "pending")
+             .order_by(Approval.created_at.desc()).all())
+    seen, changed = set(), False
     for a in dupes:
         key = (a.site_id, a.kind, a.title)
-        if key in seen_keys:
+        if key in seen:
             a.status = "superseded"
-            collapsed = True
+            changed = True
         else:
-            seen_keys.add(key)
-    if collapsed:
+            seen.add(key)
+    if changed:
         db.commit()
-    pending = (
-        db.query(Approval, Site)
-        .join(Site, Approval.site_id == Site.id)
-        .filter(Approval.status == "pending")
-        .order_by(Approval.created_at.desc())
-        .all()
-    )
-    # "Needs your attention" — findings only a human can fix (real phone, license,
-    # prices). They recur each audit until fixed on the site.
-    human_tasks = [
-        {"finding": f, "site": s}
-        for f, s in (
-            db.query(Finding, Site).join(Site, Finding.site_id == Site.id)
-            .filter(Finding.status == "needs-human")
-            .order_by(Finding.created_at.desc()).all()
-        )
-    ]
+
+
+def _human_task_items(db, site_id=None) -> list:
+    q = (db.query(Finding, Site).join(Site, Finding.site_id == Site.id)
+         .filter(Finding.status == "needs-human"))
+    if site_id:
+        q = q.filter(Finding.site_id == site_id)
+    return [{"finding": f, "site": s} for f, s in q.order_by(Finding.created_at.desc()).all()]
+
+
+def _approval_items(db, site_id=None) -> list:
+    q = (db.query(Approval, Site).join(Site, Approval.site_id == Site.id)
+         .filter(Approval.status == "pending"))
+    if site_id:
+        q = q.filter(Approval.site_id == site_id)
     items = []
-    for appr, site in pending:
+    for appr, site in q.order_by(Approval.created_at.desc()).all():
         body, code, preview_html, text_diff = "", "", "", []
         try:
             payload = json.loads(appr.payload or "{}")
@@ -1031,6 +1063,16 @@ def approvals(request: Request, notice: str = "", db: Session = Depends(get_db))
             code = payload.get("jsonld", "")
         items.append({"approval": appr, "site": site, "body": body, "code": code,
                       "preview_html": preview_html, "text_diff": text_diff})
+    return items
+
+
+@app.get("/approvals", response_class=HTMLResponse)
+def approvals(request: Request, notice: str = "", db: Session = Depends(get_db)):
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    _collapse_dupe_approvals(db)
+    items = _approval_items(db)
+    human_tasks = _human_task_items(db)
     return templates.TemplateResponse(
         "approvals.html",
         {"request": request, "user": current_user(request), "items": items, "notice": notice,

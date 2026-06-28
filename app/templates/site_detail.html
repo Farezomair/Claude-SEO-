@@ -1,704 +1,318 @@
 {% extends "base.html" %}
 {% block title %}{{ site.name }} &middot; Ascend{% endblock %}
-{% block head %}
-  {% if tab == 'audit' and latest_audit and latest_audit.status == 'running' %}
-  <meta http-equiv="refresh" content="5">
-  {% endif %}
-  {% if tab == 'audit' and page_draft_running %}
-  <meta http-equiv="refresh" content="6">
-  {% endif %}
-  {% if tab == 'audit' and onpage_running %}
-  <meta http-equiv="refresh" content="6">
-  {% endif %}
-  {% if tab == 'audit' and dedupe_running %}
-  <meta http-equiv="refresh" content="6">
-  {% endif %}
-  {% if tab == 'fixes' and latest_fix_run and latest_fix_run.status == 'running' %}
-  <meta http-equiv="refresh" content="6">
-  {% endif %}
-  {% if tab == 'content' and latest_draft_run and latest_draft_run.status == 'running' %}
-  <meta http-equiv="refresh" content="6">
-  {% endif %}
-  {% if tab == 'content' and latest_correction_run and latest_correction_run.status == 'running' %}
-  <meta http-equiv="refresh" content="6">
-  {% endif %}
-  {% if tab == 'reports' and latest_weekly_run and latest_weekly_run.status == 'running' %}
-  <meta http-equiv="refresh" content="8">
-  {% endif %}
-  {% if tab == 'website' and latest_change_run and latest_change_run.status == 'running' %}
-  <meta http-equiv="refresh" content="6">
-  {% endif %}
-  {% if tab == 'website' and elementor_running %}
-  <meta http-equiv="refresh" content="6">
-  {% endif %}
-  {% if tab == 'command' and fix_running %}
-  <meta http-equiv="refresh" content="5">
-  {% endif %}
-{% endblock %}
 {% block body %}
-<div class="container">
-  <p class="muted" style="margin-bottom:4px;"><a href="/sites">&larr; All websites</a></p>
-  <h1>{{ site.name }}</h1>
-  <p class="muted" style="margin-top:0;">{{ site.url }}</p>
+{% set labels = {'audit':['🔍','Audit','Scanning the site'], 'route':['🧭','Route','Assigning to doers'], 'fix':['🛠️','Fix','Applying changes'], 'report':['📊','Report','Compiling results']} %}
+<div class="container wide">
+  <p class="muted" style="margin-bottom:10px;"><a href="/sites">&larr; All websites</a></p>
 
-  <nav class="tabs">
-    <a href="/sites/{{ site.id }}?tab=command"  class="{{ 'active' if tab == 'command' else '' }}">Command Center</a>
-    <a href="/sites/{{ site.id }}?tab=audit"    class="{{ 'active' if tab == 'audit' else '' }}">Audit</a>
-    <a href="/sites/{{ site.id }}?tab=fixes"     class="{{ 'active' if tab == 'fixes' else '' }}">Fixes</a>
-    <a href="/sites/{{ site.id }}?tab=content"   class="{{ 'active' if tab == 'content' else '' }}">Content</a>
-    <a href="/sites/{{ site.id }}?tab=website"   class="{{ 'active' if tab == 'website' else '' }}">Website</a>
-    <a href="/sites/{{ site.id }}?tab=reports"   class="{{ 'active' if tab == 'reports' else '' }}">Reports</a>
-    <a href="/sites/{{ site.id }}?tab=settings"  class="{{ 'active' if tab == 'settings' else '' }}">Settings</a>
-  </nav>
-
-  {% if tab == 'command' %}
-    {% set labels = {'audit':['🔍','Audit','Scanning the site'], 'route':['🧭','Route','Assigning to doers'], 'fix':['🛠️','Fix','Applying changes'], 'report':['📊','Report','Compiling results']} %}
-    <div class="cc-grid">
-      <aside class="cc-side">
-        <div class="card" style="padding:16px;">
-          <div class="crew-group">
-            <p class="crew-h">Auditors</p>
-            <div class="crew-item" data-group="audit"><span class="dot"></span><div><div class="nm">Website Auditor</div><div class="role">Crawl &amp; on-page scan</div></div></div>
-            <div class="crew-item" data-group="audit"><span class="dot"></span><div><div class="nm">Search Console Auditor</div><div class="role">Ranking &amp; CTR signals</div></div></div>
-          </div>
-          <div class="crew-group">
-            <p class="crew-h">Doers</p>
-            <div class="crew-item" data-group="fix"><span class="dot"></span><div><div class="nm">SEO Technical</div><div class="role">Titles &amp; meta</div></div></div>
-            <div class="crew-item" data-group="fix"><span class="dot"></span><div><div class="nm">SEO On-page</div><div class="role">Rankings &amp; page rewrites</div></div></div>
-            <div class="crew-item" data-group="fix"><span class="dot"></span><div><div class="nm">Website Agent</div><div class="role">CSS &amp; missing pages</div></div></div>
-            <div class="crew-item" data-group="fix"><span class="dot"></span><div><div class="nm">Content Team</div><div class="role">Drafts &amp; cleanups</div></div></div>
-          </div>
-          <div class="crew-group">
-            <p class="crew-h">Reports</p>
-            <div class="crew-item" data-group="report"><span class="dot"></span><div><div class="nm">Report Generator</div><div class="role">Weekly before/after</div></div></div>
-          </div>
-        </div>
-      </aside>
-
-      <div>
-        {% if audit_score is not none %}
-        <div class="card">
-          <div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap;">
-            <div class="score-ring grade-{{ audit_grade }}" style="--p:{{ audit_score }};">
-              <div class="score-num">{{ audit_score }}</div>
-              <div class="score-lbl">/ 100</div>
-            </div>
-            <div style="flex:1; min-width:240px;">
-              <div style="display:flex; align-items:center; gap:10px;">
-                <h2 style="margin:0;">SEO Health</h2>
-                <span class="grade-chip grade-{{ audit_grade }}">{{ audit_grade }}</span>
-              </div>
-              <div class="cat-bars">
-                {% for c in audit_categories %}
-                <div class="cat-row">
-                  <span class="cat-name">{{ c.label }}</span>
-                  <span class="cat-track"><i style="width:{{ c.score }}%;"></i></span>
-                  <span class="cat-score">{{ c.score }}</span>
-                </div>
-                {% endfor %}
-              </div>
-            </div>
-          </div>
-          {% if audit_roadmap %}
-          <h3 style="margin-top:20px;">Top priorities</h3>
-          <ul class="prio-list">
-            {% for r in audit_roadmap[:5] %}
-            <li class="prio-item">
-              <span class="prio-sev sev-{{ r.severity }}">{{ r.severity }}</span>
-              <div><div class="prio-body">{{ r.title }}</div>
-                <div class="prio-meta">{{ r.category_label }} &middot; owner: {{ r.route }}</div></div>
-            </li>
-            {% endfor %}
-          </ul>
-          {% endif %}
-        </div>
-        {% endif %}
-
-        <div class="card">
-          <div class="cc-hero">
-            <div>
-              <h2 style="margin:0;">Pipeline</h2>
-              <p class="muted" id="cc-summary" style="margin:3px 0 0; font-size:13px;">{{ pipeline.summary or 'Idle — start a run to audit the site, apply fixes, and compile a report.' }}</p>
-            </div>
-            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-              <form method="post" action="/sites/{{ site.id }}/run-weekly">
-                <button class="btn" id="cc-run" type="submit" {{ 'disabled' if weekly_running else '' }}>{{ 'Crew working…' if weekly_running else '▶ Start full run' }}</button>
-              </form>
-              <form method="post" action="/sites/{{ site.id }}/run-fixes">
-                <button class="btn secondary" type="submit" {{ 'disabled' if weekly_running or fix_running else '' }}>{{ 'Fixing…' if fix_running else 'Apply fixes' }}</button>
-              </form>
-              <a class="btn secondary" id="cc-viewreport" href="/sites/{{ site.id }}?tab=reports" {{ '' if latest_report else 'style=display:none;' }}>View report</a>
-            </div>
-          </div>
-          {% if latest_fix and not fix_running and latest_fix.summary %}
-            <div class="notice notice-muted" style="margin-top:4px;">Last fix run: {{ latest_fix.summary }}</div>
-          {% endif %}
-
-          <div class="pipeline" id="cc-pipeline">
-            {% for s in pipeline.stages %}
-            <div class="stage {{ s.state }}" data-stage="{{ s.key }}">
-              <span class="st-state" data-role="state">{{ {'pending':'Waiting','active':'Working','done':'Done','failed':'Failed'}[s.state] }}</span>
-              <div class="ico">{{ labels[s.key][0] }}</div>
-              <div class="st-title">{{ labels[s.key][1] }}</div>
-              <div class="st-sub">{{ labels[s.key][2] }}</div>
-              <div class="bar"><i></i></div>
-            </div>
-            {% endfor %}
-          </div>
-
-          <div class="cc-stat">
-            <div><div class="n" id="cc-findings">{{ pipeline.findings if pipeline.findings is not none else '—' }}</div><div class="l">Findings</div></div>
-            <div><div class="n" id="cc-fixes">{{ pipeline.fixes if pipeline.fixes is not none else '—' }}</div><div class="l">Fixes applied</div></div>
-          </div>
-        </div>
-
-        {% if not connection_active %}
-          <div class="notice notice-muted">Tip: connect WordPress in <a href="/sites/{{ site.id }}?tab=settings">Settings</a> so the crew can <strong>apply</strong> fixes, not just detect them.</div>
-        {% endif %}
-      </div>
+  <!-- Header + action bar -->
+  <div class="card cc-actionbar">
+    <div>
+      <h1 class="site-title"><span class="site-glyph">🔥</span> {{ site.name }}</h1>
+      <p class="muted" style="margin:8px 0 0;">
+        {{ site.url }}
+        {% if latest_audit %}&middot; last audited {{ latest_audit.created_at | pkt }}{% endif %}
+      </p>
     </div>
-
-    <script>
-      (function () {
-        var STATE_LABEL = {pending:'Waiting', active:'Working', done:'Done', failed:'Failed'};
-        var GROUP_FOR_PHASE = {audit:'audit', route:'audit', fix:'fix', report:'report'};
-        var url = "/sites/{{ site.id }}/pipeline-status";
-        var timer = null;
-
-        function render(d) {
-          (d.stages || []).forEach(function (s) {
-            var el = document.querySelector('.stage[data-stage="' + s.key + '"]');
-            if (!el) return;
-            el.className = 'stage ' + s.state;
-            var lab = el.querySelector('[data-role=state]');
-            // Fix stage: show one-by-one progress (N/total) and fill its bar proportionally.
-            if (s.key === 'fix' && s.state === 'active' && d.fix_total) {
-              if (lab) lab.textContent = (d.fix_done || 0) + '/' + d.fix_total;
-              var bar = el.querySelector('.bar > i');
-              if (bar) {
-                bar.style.animation = 'none';
-                bar.style.width = Math.round((d.fix_done || 0) / d.fix_total * 100) + '%';
-              }
-              var sub = el.querySelector('.st-sub');
-              if (sub && d.fix_label) sub.textContent = d.fix_label;
-            } else if (lab) {
-              lab.textContent = STATE_LABEL[s.state] || '';
-            }
-          });
-          var f = document.getElementById('cc-findings');
-          var x = document.getElementById('cc-fixes');
-          if (f) f.textContent = (d.findings === null || d.findings === undefined) ? '—' : d.findings;
-          if (x) x.textContent = (d.fixes === null || d.fixes === undefined) ? '—' : d.fixes;
-          var sm = document.getElementById('cc-summary');
-          if (sm && d.summary) sm.textContent = d.summary;
-
-          var grp = d.running ? GROUP_FOR_PHASE[d.phase] : null;
-          document.querySelectorAll('.crew-item').forEach(function (c) {
-            c.classList.toggle('working', !!grp && c.getAttribute('data-group') === grp);
-            c.classList.toggle('done', !d.running && d.status === 'completed');
-          });
-
-          var run = document.getElementById('cc-run');
-          if (run) { run.disabled = d.running; run.textContent = d.running ? 'Crew working…' : '▶ Start full run'; }
-          var vr = document.getElementById('cc-viewreport');
-          if (vr && d.report_id) vr.style.display = '';
-        }
-
-        function poll() {
-          fetch(url, {headers: {'Accept': 'application/json'}})
-            .then(function (r) { return r.json(); })
-            .then(function (d) {
-              render(d);
-              if (!d.running && timer) { clearInterval(timer); timer = null; }
-            })
-            .catch(function () {});
-        }
-        poll();
-        timer = setInterval(poll, 1500);
-      })();
-    </script>
-
-  {% elif tab == 'audit' %}
-    {% set running = latest_audit and latest_audit.status == 'running' %}
-    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
-      <div>
-        {% if latest_audit %}
-          <span class="muted">Last run:</span>
-          {{ latest_audit.created_at | pkt }}
-          &middot; {{ latest_audit.status | badge }}
-        {% else %}
-          <span class="muted">No audits run yet.</span>
-        {% endif %}
-      </div>
-      <form method="post" action="/sites/{{ site.id }}/audit">
-        <button class="btn" type="submit" {{ 'disabled' if running else '' }}>
-          {{ 'Audit running…' if running else 'Run audit' }}
-        </button>
+    <div class="cc-actions">
+      <form method="post" action="/sites/{{ site.id }}/run-weekly">
+        <button class="btn big" id="cc-run" type="submit" {{ 'disabled' if weekly_running else '' }}>{{ 'Crew working…' if weekly_running else '▶ Run audit & fix' }}</button>
+      </form>
+      <form method="post" action="/sites/{{ site.id }}/run-fixes">
+        <button class="btn secondary" type="submit" {{ 'disabled' if weekly_running or fix_running else '' }}>{{ 'Fixing…' if fix_running else 'Apply fixes' }}</button>
       </form>
     </div>
+  </div>
 
-    {% if running %}
-      <div class="empty">Audit in progress — this page refreshes automatically.</div>
-    {% elif latest_audit and latest_audit.status == 'failed' %}
-      <div class="card"><div class="error">{{ latest_audit.summary }}</div></div>
-    {% elif latest_audit and latest_audit.status == 'completed' %}
-      <div class="card"><p style="margin:0;">{{ latest_audit.summary }}</p></div>
-      {% if draftable_pages and page_connection_active %}
-        <div class="card row-between">
-          <div>The Website Agent can draft <strong>{{ draftable_pages }} missing page(s)</strong> for your review.</div>
-          <form method="post" action="/sites/{{ site.id }}/draft-pages">
-            <button class="btn small" type="submit" {{ 'disabled' if page_draft_running else '' }}>
-              {{ 'Drafting…' if page_draft_running else 'Draft missing pages' }}
-            </button>
-          </form>
+  <!-- Pipeline (click a stage for live detail) -->
+  <div class="card">
+    <div class="row-between">
+      <h2 style="margin:0;">Pipeline</h2>
+      <span class="muted" id="cc-summary" style="font-size:13px;">{{ pipeline.summary or 'Idle — run an audit to scan, fix, and report.' }}</span>
+    </div>
+    <div class="pipeline" id="cc-pipeline" style="margin-top:16px;">
+      {% for s in pipeline.stages %}
+      <div class="stage {{ s.state }}" data-stage="{{ s.key }}">
+        <span class="st-state" data-role="state">{{ {'pending':'Waiting','active':'Working','done':'Done','failed':'Failed'}[s.state] }}</span>
+        <div class="ico">{{ labels[s.key][0] }}</div>
+        <div class="st-title">{{ labels[s.key][1] }}</div>
+        <div class="st-sub" data-role="sub">{{ labels[s.key][2] }}</div>
+        <div class="bar"><i></i></div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="cc-detail" id="cc-detail" style="display:none;"></div>
+    <div class="cc-stat">
+      <div><div class="n" id="cc-findings">{{ pipeline.findings if pipeline.findings is not none else '—' }}</div><div class="l">Findings</div></div>
+      <div><div class="n" id="cc-fixes">{{ pipeline.fixes if pipeline.fixes is not none else '—' }}</div><div class="l">Fixes applied</div></div>
+    </div>
+    <p class="muted" style="font-size:12px; margin:10px 0 0;">Tip: click a stage above to watch what it's doing.</p>
+  </div>
+
+  <!-- Health score + narrative -->
+  {% if audit_score is not none %}
+  <div class="card">
+    <div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap;">
+      <div class="score-ring grade-{{ audit_grade }}" style="--p:{{ audit_score }};">
+        <div class="score-num">{{ audit_score }}</div><div class="score-lbl">/ 100</div>
+      </div>
+      <div style="flex:1; min-width:260px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <h2 style="margin:0;">SEO Health</h2>
+          <span class="grade-chip grade-{{ audit_grade }}">{{ audit_grade }}</span>
         </div>
-      {% endif %}
-      {% if ranking_opps and page_connection_active %}
-        <div class="card row-between">
-          <div>SEO On-page can improve <strong>{{ ranking_opps }} ranking opportunity(ies)</strong> from Search Console (rewrite title &amp; description for more clicks).</div>
-          <form method="post" action="/sites/{{ site.id }}/improve-rankings">
-            <button class="btn small" type="submit" {{ 'disabled' if onpage_running else '' }}>
-              {{ 'Working…' if onpage_running else 'Improve ranking pages' }}
-            </button>
-          </form>
-        </div>
-      {% endif %}
-      {% if dup_titles and page_connection_active %}
-        <div class="card row-between">
-          <div>SEO Technical can make <strong>{{ dup_titles }} duplicate title(s)</strong> unique.</div>
-          <form method="post" action="/sites/{{ site.id }}/fix-duplicate-titles">
-            <button class="btn small" type="submit" {{ 'disabled' if dedupe_running else '' }}>
-              {{ 'Working…' if dedupe_running else 'Fix duplicate titles' }}
-            </button>
-          </form>
-        </div>
-      {% endif %}
-      {% if audit_categories %}
-        <div class="card">
-          <div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap;">
-            <div class="score-ring grade-{{ latest_audit.grade }}" style="--p:{{ latest_audit.health_score }};">
-              <div class="score-num">{{ latest_audit.health_score }}</div>
-              <div class="score-lbl">/ 100</div>
-            </div>
-            <div style="flex:1; min-width:240px;">
-              <div style="display:flex; align-items:center; gap:10px;">
-                <h2 style="margin:0;">SEO Health by category</h2>
-                <span class="grade-chip grade-{{ latest_audit.grade }}">{{ latest_audit.grade }}</span>
-              </div>
-              <div class="cat-bars">
-                {% for c in audit_categories %}
-                <div class="cat-row">
-                  <span class="cat-name">{{ c.label }} <span class="muted" style="font-size:11px;">({{ c.count }})</span></span>
-                  <span class="cat-track"><i style="width:{{ c.score }}%;"></i></span>
-                  <span class="cat-score">{{ c.score }}</span>
-                </div>
-                {% endfor %}
-              </div>
-            </div>
+        <div class="cat-bars">
+          {% for c in audit_categories %}
+          <div class="cat-row">
+            <span class="cat-name">{{ c.label }}</span>
+            <span class="cat-track"><i style="width:{{ c.score }}%;"></i></span>
+            <span class="cat-score">{{ c.score }}</span>
           </div>
-          {% if audit_roadmap %}
-          <h3 style="margin-top:20px;">Prioritized fix plan</h3>
-          <ul class="prio-list">
-            {% for r in audit_roadmap %}
-            <li class="prio-item">
-              <span class="prio-sev sev-{{ r.severity }}">{{ r.severity }}</span>
-              <div><div class="prio-body">{{ r.title }}</div>
-                <div class="prio-meta">{{ r.category_label }} &middot; owner: {{ r.route }}</div></div>
-            </li>
-            {% endfor %}
-          </ul>
-          {% endif %}
+          {% endfor %}
         </div>
+      </div>
+    </div>
+    {% if narrative %}<p class="cc-narrative">{{ narrative }}</p>{% endif %}
+  </div>
+  {% else %}
+  <div class="empty">No audit yet — click <strong>Run audit &amp; fix</strong> to scan the site, fix what's safe, and queue the rest.</div>
+  {% endif %}
+
+  <!-- Full report (expandable) -->
+  {% if audit_roadmap or findings or chart %}
+  <details class="cc-panel">
+    <summary><h2>Full report</h2>{% if latest_audit %}<span class="muted" style="font-size:12px; margin-left:auto;">{{ latest_audit.created_at | pkt }}</span>{% endif %}</summary>
+    <div class="panel-body">
+      {% if audit_roadmap %}
+      <h3>Prioritized fix plan</h3>
+      <ul class="prio-list">
+        {% for r in audit_roadmap %}
+        <li class="prio-item">
+          <span class="prio-sev sev-{{ r.severity }}">{{ r.severity }}</span>
+          <div><div class="prio-body">{{ r.title }}</div>
+            <div class="prio-meta">{{ r.category_label }} &middot; owner: {{ r.route }}</div></div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+
+      {% if chart %}
+      <h3 style="margin-top:22px;">Progress over time</h3>
+      <p class="muted" style="margin-top:-2px;">Issues found, fixes applied, and health score across your audits.</p>
+      <svg viewBox="0 0 {{ chart.w }} {{ chart.h }}" style="width:100%; height:auto; overflow:visible;">
+        <polyline points="{{ chart.issues_pts }}" fill="none" stroke="#fb7185" stroke-width="2.5" stroke-linejoin="round"/>
+        <polyline points="{{ chart.fixes_pts }}" fill="none" stroke="#818cf8" stroke-width="2.5" stroke-linejoin="round"/>
+        <polyline points="{{ chart.score_pts }}" fill="none" stroke="#2dd4bf" stroke-width="2.5" stroke-linejoin="round"/>
+        {% for p in chart.points %}
+        <circle cx="{{ p.x }}" cy="{{ p.yi }}" r="3.5" fill="#fb7185"/>
+        <text x="{{ p.x }}" y="{{ p.yi - 8 }}" fill="#fb7185" font-size="10" text-anchor="middle">{{ p.issues }}</text>
+        <circle cx="{{ p.x }}" cy="{{ p.yf }}" r="3.5" fill="#818cf8"/>
+        <circle cx="{{ p.x }}" cy="{{ p.ys }}" r="3.5" fill="#2dd4bf"/>
+        <text x="{{ p.x }}" y="{{ p.ys + 16 }}" fill="#2dd4bf" font-size="10" text-anchor="middle">{{ p.score }}</text>
+        {% endfor %}
+      </svg>
+      <div style="display:flex; gap:20px; font-size:12px; margin-top:6px;" class="muted">
+        <span><span style="color:#fb7185;">●</span> Issues</span>
+        <span><span style="color:#818cf8;">●</span> Fixes</span>
+        <span><span style="color:#2dd4bf;">●</span> Health</span>
+      </div>
       {% endif %}
 
       {% if findings %}
-        <h3 style="margin-top:24px;">All findings</h3>
-        <div class="card" style="padding:0;">
-          <table>
-            <thead><tr><th>Severity</th><th>Finding</th><th>Owner</th><th>Status</th><th>Result</th></tr></thead>
-            <tbody>
-              {% for f in findings %}
-              <tr>
-                <td>{{ f.severity | badge }}</td>
-                <td>{{ f.issue }}</td>
-                <td>{{ f.route }}</td>
-                <td>{{ f.status | badge }}</td>
-                <td>{% if f.remark %}<span class="fres fres-{{ f.status }}">{{ f.remark }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      {% else %}
-        <div class="empty">No issues found. 🎉</div>
+      <h3 style="margin-top:22px;">All findings ({{ findings|length }})</h3>
+      <div class="card" style="padding:0;">
+        <table>
+          <thead><tr><th>Severity</th><th>Finding</th><th>Owner</th><th>Status</th><th>Result</th></tr></thead>
+          <tbody>
+            {% for f in findings %}
+            <tr>
+              <td>{{ f.severity | badge }}</td>
+              <td>{{ f.issue }}</td>
+              <td>{{ f.route }}</td>
+              <td>{{ f.status | badge }}</td>
+              <td>{% if f.remark %}<span class="fres fres-{{ f.status }}">{{ f.remark }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
       {% endif %}
-    {% else %}
-      <div class="empty">Click <strong>Run audit</strong> to crawl this site for broken pages, broken links, and missing header/footer.</div>
-    {% endif %}
-  {% elif tab == 'fixes' %}
-    {% set running = latest_fix_run and latest_fix_run.status == 'running' %}
-    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
-      <div>
-        {% if latest_fix_run %}
-          <span class="muted">Last run:</span>
-          {{ latest_fix_run.created_at.strftime('%Y-%m-%d %H:%M UTC') if latest_fix_run.created_at else '' }}
-          &middot; {{ latest_fix_run.status | badge }}
-        {% else %}
-          <span class="muted">No fix runs yet.</span>
-        {% endif %}
-      </div>
-      <form method="post" action="/sites/{{ site.id }}/fix-metas">
-        <button class="btn" type="submit" {{ 'disabled' if running or not connection_active else '' }}>
-          {{ 'Running…' if running else 'Run meta fixes' }}
-        </button>
-      </form>
     </div>
+  </details>
+  {% endif %}
 
-    {% if not connection_active %}
-      <div class="card"><div class="error">No WordPress connection yet. Set it up in the <a href="/sites/{{ site.id }}?tab=settings">Settings</a> tab before running fixes.</div></div>
-    {% elif running %}
-      <div class="empty">Applying meta fixes — this page refreshes automatically.</div>
-    {% elif latest_fix_run and latest_fix_run.status == 'failed' %}
-      <div class="card"><div class="error">{{ latest_fix_run.summary }}</div></div>
-    {% elif latest_fix_run %}
-      <div class="card"><p style="margin:0;">{{ latest_fix_run.summary }}</p></div>
-    {% else %}
-      <div class="empty">Click <strong>Run meta fixes</strong> to write SEO-improved titles and descriptions to pages that need them. Each change is verified before it's marked done.</div>
-    {% endif %}
+  <!-- Approvals (expandable) -->
+  <details class="cc-panel" {{ 'open' if (human_tasks or approval_items) else '' }}>
+    <summary><h2>Approvals</h2>{% if approval_items %}<span class="pill-count" style="margin-left:6px;">{{ approval_items|length }}</span>{% endif %}{% if human_tasks %}<span class="muted" style="font-size:12px; margin-left:8px;">{{ human_tasks|length }} need you</span>{% endif %}</summary>
+    <div class="panel-body">
+      {% if not human_tasks and not approval_items %}
+        <div class="empty">Nothing waiting. Run an audit & fix, and proposed changes land here.</div>
+      {% endif %}
 
-    {% if fix_records %}
-      <div class="card" style="padding:0; margin-top:16px;">
-        <table>
-          <thead><tr><th>Verdict</th><th>Doer</th><th>Field</th><th>New value</th><th>Method</th><th>Page</th></tr></thead>
-          <tbody>
-            {% for fx in fix_records %}
-            <tr>
-              <td>{{ (fx.verification_verdict or fx.status) | badge }}</td>
-              <td>{{ fx.doer }}</td>
-              <td>{{ fx.field.replace('_', ' ') if fx.field else '' }}</td>
-              <td>{{ fx.after_value }}</td>
-              <td>{{ fx.method | badge }}</td>
-              <td class="muted">{{ fx.page_ref }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    {% endif %}
-  {% elif tab == 'website' %}
-    {% set running = latest_change_run and latest_change_run.status == 'running' %}
-    <p class="muted" style="margin-top:0;">Describe a visual change in plain English. The agent writes the CSS and sends it to <a href="/approvals">Approvals</a> — nothing goes live until you approve it, and every applied change can be reverted in one click.</p>
-    <form method="post" action="/sites/{{ site.id }}/request-change" style="margin-bottom:16px;">
-      <div class="field">
-        <label for="change">What would you like to change?</label>
-        <input type="text" id="change" name="change" placeholder="e.g. Make the buttons bigger and orange with rounded corners">
-      </div>
-      <button class="btn" type="submit" {{ 'disabled' if running or not connection_active else '' }}>
-        {{ 'Designing…' if running else 'Request change' }}
-      </button>
-    </form>
-
-    {% if not connection_active %}
-      <div class="notice notice-danger">No WordPress connection yet. Set it up in the <a href="/sites/{{ site.id }}?tab=settings">Settings</a> tab first.</div>
-    {% elif notice == 'reverted' %}
-      <div class="notice notice-success">Change reverted — the site is back to how it was.</div>
-    {% elif notice == 'revert_fail' %}
-      <div class="notice notice-danger">Couldn't revert — check the connection and try again.</div>
-    {% elif running %}
-      <div class="empty">Designing your change — this page refreshes automatically.</div>
-    {% elif latest_change_run and latest_change_run.status == 'failed' %}
-      <div class="notice notice-danger">{{ latest_change_run.summary }}</div>
-    {% endif %}
-
-    {% if changes %}
-      <div class="card" style="padding:0; margin-top:16px;">
-        <table>
-          <thead><tr><th>Status</th><th>Request</th><th>When</th><th></th></tr></thead>
-          <tbody>
-            {% for c in changes %}
-            <tr>
-              <td>{{ c.status | badge }}</td>
-              <td>{{ c.request }}</td>
-              <td class="muted">{{ c.created_at.strftime('%Y-%m-%d %H:%M') if c.created_at else '' }}</td>
-              <td>
-                {% if c.status == 'applied' %}
-                <form method="post" action="/sites/{{ site.id }}/changes/{{ c.id }}/revert">
-                  <button class="btn secondary small" type="submit">Revert</button>
-                </form>
-                {% endif %}
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    {% else %}
-      <div class="empty" style="margin-top:8px;">No changes yet.</div>
-    {% endif %}
-
-    <h2 style="margin-top:32px;">Page content (Elementor)</h2>
-    <p class="muted" style="margin-top:0;">The On-page agent reads a page's real content and rewrites the copy for SEO, then sends it to <a href="/approvals">Approvals</a> with a full visual preview. Structure, styling, links and images are preserved, and every applied rewrite can be reverted in one click.</p>
-    {% if elementor_running %}
-      <div class="empty">Rewriting a page — this page refreshes automatically.</div>
-    {% elif latest_elementor_run and latest_elementor_run.status == 'failed' %}
-      <div class="notice notice-danger">{{ latest_elementor_run.summary }}</div>
-    {% endif %}
-    {% if elementor_pages %}
-      <div class="card" style="padding:0; margin-top:12px;">
-        <table>
-          <thead><tr><th>Page</th><th>Modified</th><th></th></tr></thead>
-          <tbody>
-            {% for p in elementor_pages %}
-            <tr>
-              <td>{{ p.title }}</td>
-              <td class="muted">{{ p.modified }}</td>
-              <td>
-                <form method="post" action="/sites/{{ site.id }}/rewrite-page">
-                  <input type="hidden" name="page_id" value="{{ p.id }}">
-                  <input type="hidden" name="page_title" value="{{ p.title }}">
-                  <button class="btn small" type="submit" {{ 'disabled' if elementor_running else '' }}>Rewrite for SEO</button>
-                </form>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    {% elif connection_active %}
-      <div class="empty" style="margin-top:8px;">No Elementor pages found (or the Abilities API isn't reachable on this site).</div>
-    {% endif %}
-  {% elif tab == 'reports' %}
-    {% set running = latest_weekly_run and latest_weekly_run.status == 'running' %}
-    <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <div>
-          <strong>Weekly schedule:</strong>
-          {% if scheduler_enabled %}<span style="color:#4ade80;">on</span> — runs itself every {{ interval_days }} days{% else %}<span class="muted">off</span>{% endif %}
-          <br>
-          <span class="muted">
-            {% if latest_weekly_run %}Last run: {{ latest_weekly_run.created_at | pkt }} &middot; {{ latest_weekly_run.status | badge }}{% else %}No weekly run yet.{% endif %}
-          </span>
-        </div>
-        <form method="post" action="/sites/{{ site.id }}/run-weekly">
-          <button class="btn" type="submit" {{ 'disabled' if running else '' }}>
-            {{ 'Running…' if running else 'Run weekly now' }}
-          </button>
-        </form>
-      </div>
-    </div>
-
-    {% if running %}
-      <div class="empty">Weekly run in progress (audit → fixes → report) — this page refreshes automatically.</div>
-    {% elif latest_weekly_run and latest_weekly_run.status == 'failed' %}
-      <div class="card"><div class="error">{{ latest_weekly_run.summary }}</div></div>
-    {% endif %}
-
-    {% if audit_score is not none %}
-      <div class="card">
-        <div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap;">
-          <div class="score-ring grade-{{ audit_grade }}" style="--p:{{ audit_score }};">
-            <div class="score-num">{{ audit_score }}</div>
-            <div class="score-lbl">/ 100</div>
+      {% if human_tasks %}
+        <h3>Needs your attention</h3>
+        <p class="muted" style="margin-top:-2px;">Real-world facts only you can provide (a real phone, license, address, prices). They recur each audit until fixed on the site.</p>
+        {% for t in human_tasks %}
+        <div class="card" style="border-left:3px solid var(--warning);">
+          <div class="row-between"><strong>{{ t.site.name }}</strong><span>{{ t.finding.severity | badge }}</span></div>
+          <p style="margin:8px 0 4px;">{{ t.finding.issue }}</p>
+          {% if t.finding.evidence_url %}<p class="muted" style="margin:0; font-size:12px;">{{ t.finding.evidence_url }}</p>{% endif %}
+          <div style="display:flex; gap:8px; margin-top:12px;">
+            <form method="post" action="/findings/{{ t.finding.id }}/done"><button class="btn small" type="submit">Done — I fixed it</button></form>
+            <form method="post" action="/findings/{{ t.finding.id }}/snooze"><button class="btn secondary small" type="submit">I'll do it later</button></form>
           </div>
-          <div style="flex:1; min-width:240px;">
-            <div style="display:flex; align-items:center; gap:10px;">
-              <h2 style="margin:0;">SEO Health</h2>
-              <span class="grade-chip grade-{{ audit_grade }}">{{ audit_grade }}</span>
-            </div>
-            <div class="cat-bars">
-              {% for c in audit_categories %}
-              <div class="cat-row">
-                <span class="cat-name">{{ c.label }}</span>
-                <span class="cat-track"><i style="width:{{ c.score }}%;"></i></span>
-                <span class="cat-score">{{ c.score }}</span>
-              </div>
-              {% endfor %}
-            </div>
-          </div>
-        </div>
-        {% if audit_roadmap %}
-        <h3 style="margin-top:20px;">Top priorities</h3>
-        <ul class="prio-list">
-          {% for r in audit_roadmap[:5] %}
-          <li class="prio-item">
-            <span class="prio-sev sev-{{ r.severity }}">{{ r.severity }}</span>
-            <div><div class="prio-body">{{ r.title }}</div>
-              <div class="prio-meta">{{ r.category_label }} &middot; owner: {{ r.route }}</div></div>
-          </li>
-          {% endfor %}
-        </ul>
-        {% endif %}
-      </div>
-    {% endif %}
-
-    {% if chart %}
-      <div class="card">
-        <h2>Progress over time</h2>
-        <p class="muted" style="margin-top:-6px;">Issues found and SEO health score across your audits — watch issues fall and health climb as the crew works.</p>
-        <svg viewBox="0 0 {{ chart.w }} {{ chart.h }}" style="width:100%; height:auto; overflow:visible;">
-          <polyline points="{{ chart.issues_pts }}" fill="none" stroke="#fb7185" stroke-width="2.5" stroke-linejoin="round"/>
-          <polyline points="{{ chart.fixes_pts }}" fill="none" stroke="#818cf8" stroke-width="2.5" stroke-linejoin="round"/>
-          <polyline points="{{ chart.score_pts }}" fill="none" stroke="#2dd4bf" stroke-width="2.5" stroke-linejoin="round"/>
-          {% for p in chart.points %}
-          <circle cx="{{ p.x }}" cy="{{ p.yi }}" r="3.5" fill="#fb7185"/>
-          <text x="{{ p.x }}" y="{{ p.yi - 8 }}" fill="#fb7185" font-size="10" text-anchor="middle">{{ p.issues }}</text>
-          <circle cx="{{ p.x }}" cy="{{ p.yf }}" r="3.5" fill="#818cf8"/>
-          <circle cx="{{ p.x }}" cy="{{ p.ys }}" r="3.5" fill="#2dd4bf"/>
-          <text x="{{ p.x }}" y="{{ p.ys + 16 }}" fill="#2dd4bf" font-size="10" text-anchor="middle">{{ p.score }}</text>
-          {% endfor %}
-        </svg>
-        <div style="display:flex; gap:20px; font-size:12px; margin-top:6px;" class="muted">
-          <span><span style="color:#fb7185;">●</span> Issues found</span>
-          <span><span style="color:#818cf8;">●</span> Fixes applied</span>
-          <span><span style="color:#2dd4bf;">●</span> Health score</span>
-        </div>
-      </div>
-    {% endif %}
-
-    {% if changes %}
-      <div class="card">
-        <h2>What changed — before &amp; after</h2>
-        <p class="muted" style="margin-top:-6px;">The most recent live changes the crew applied, with the old value and the new value.</p>
-        {% for c in changes %}
-        <div style="border-top:1px solid var(--border-soft); padding:14px 0;">
-          <div class="row-between" style="margin-bottom:8px;">
-            <strong>{{ c.doer }}</strong>
-            <span class="muted" style="font-size:12px;">{{ c.field }}{% if c.page_ref %} &middot; {{ c.page_ref }}{% endif %} {% if c.verdict %}&middot; {{ c.verdict | badge }}{% endif %}</span>
-          </div>
-          {% if c.is_page %}
-            <pre style="border:1px solid var(--border); border-radius:8px; padding:14px; max-height:280px; overflow:auto; background:#0f1219; font-size:12.5px; white-space:pre-wrap; line-height:1.5; margin:0;">{% for kind, line in c.diff %}{% if kind == 'add' %}<span style="color:#4ade80;">+ {{ line }}</span>
-{% elif kind == 'del' %}<span style="color:#f87171;">- {{ line }}</span>
-{% endif %}{% endfor %}</pre>
-          {% else %}
-            <div style="display:grid; grid-template-columns:1fr auto 1fr; gap:12px; align-items:center;">
-              <div style="background:rgba(251,113,133,.08); border:1px solid rgba(251,113,133,.25); border-radius:8px; padding:10px 12px; font-size:13px; color:#fda4af;">{{ c.before or '(was empty)' }}</div>
-              <div class="muted" style="font-size:18px;">→</div>
-              <div style="background:rgba(52,211,153,.08); border:1px solid rgba(52,211,153,.25); border-radius:8px; padding:10px 12px; font-size:13px; color:#6ee7b7;">{{ c.after }}</div>
-            </div>
-          {% endif %}
         </div>
         {% endfor %}
-      </div>
-    {% endif %}
+      {% endif %}
 
-    {% if reports %}
-      {% for r in reports %}
+      {% for item in approval_items %}
       <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:baseline;">
-          <h2 style="margin-bottom:4px;">Weekly report</h2>
-          <span class="muted">{{ r.created_at | pkt }}</span>
+        <div class="row-between"><h3 style="margin:0;">{{ item.approval.title }}</h3><span class="muted" style="font-size:12px;">{{ item.approval.kind }}</span></div>
+        {% if item.approval.summary %}<p style="margin:8px 0;">{{ item.approval.summary }}</p>{% endif %}
+        {% if item.text_diff %}
+          <details><summary style="cursor:pointer; color:var(--accent);">What changed (text)</summary>
+            <pre style="border:1px solid var(--border); border-radius:8px; padding:12px; max-height:300px; overflow:auto; background:#0f1219; font-size:12.5px; white-space:pre-wrap; line-height:1.5;">{% for kind, line in item.text_diff %}{% if kind == 'add' %}<span style="color:#4ade80;">+ {{ line }}</span>
+{% elif kind == 'del' %}<span style="color:#f87171;">- {{ line }}</span>
+{% endif %}{% endfor %}</pre>
+          </details>
+        {% endif %}
+        {% if item.preview_html %}
+          <details><summary style="cursor:pointer; color:var(--accent);">Preview rewritten page</summary>
+            <iframe srcdoc="{{ item.preview_html }}" sandbox="allow-same-origin" style="width:100%; height:480px; border:1px solid var(--border); border-radius:8px; background:#fff; margin-top:8px;"></iframe>
+          </details>
+        {% endif %}
+        {% if item.body %}
+          <details><summary style="cursor:pointer; color:var(--accent);">Preview content</summary>
+            <div style="border:1px solid var(--border); border-radius:8px; padding:14px; margin-top:10px; max-height:340px; overflow:auto; background:#fff; color:#111;">{{ item.body | sanitize }}</div>
+          </details>
+        {% endif %}
+        {% if item.code %}
+          <details><summary style="cursor:pointer; color:var(--accent);">Preview code</summary>
+            <pre style="border:1px solid var(--border); border-radius:8px; padding:14px; margin-top:10px; max-height:340px; overflow:auto; background:#0f1219; color:#cbd5e1; font-size:12px; white-space:pre-wrap;">{{ item.code }}</pre>
+          </details>
+        {% endif %}
+        <div style="display:flex; gap:8px; margin-top:14px;">
+          <form method="post" action="/approvals/{{ item.approval.id }}/approve"><button class="btn" type="submit">Approve</button></form>
+          <form method="post" action="/approvals/{{ item.approval.id }}/reject"><button class="btn secondary" type="submit">Reject</button></form>
         </div>
-        <p class="muted" style="margin-top:0;">{{ r.summary }}</p>
-        <div>{{ r.body_html | sanitize }}</div>
       </div>
       {% endfor %}
-    {% else %}
-      <div class="empty" style="margin-top:8px;">No reports yet. Click <strong>Run weekly now</strong> to run the full loop (audit, fixes, report) immediately, or wait for the schedule.</div>
-    {% endif %}
-  {% elif tab == 'content' %}
-    {% set running = latest_draft_run and latest_draft_run.status == 'running' %}
-    <form method="post" action="/sites/{{ site.id }}/draft-content" style="margin-bottom:16px;">
-      <div class="field">
-        <label for="topic">Topic <span class="muted">(optional — leave blank and the agent picks one)</span></label>
-        <input type="text" id="topic" name="topic" placeholder="e.g. Choosing the right outdoor kitchen layout">
-      </div>
-      <button class="btn" type="submit" {{ 'disabled' if running else '' }}>
-        {{ 'Drafting…' if running else 'Draft a blog post' }}
-      </button>
-    </form>
-
-    {% if running %}
-      <div class="empty">Writing a draft — this page refreshes automatically.</div>
-    {% elif latest_draft_run and latest_draft_run.status == 'failed' %}
-      <div class="card"><div class="error">{{ latest_draft_run.summary }}</div></div>
-    {% elif latest_draft_run %}
-      <div class="card"><p style="margin:0;">{{ latest_draft_run.summary }}
-        <a href="/approvals">Review in Approvals →</a></p></div>
-    {% endif %}
-
-    {% set fixing = latest_correction_run and latest_correction_run.status == 'running' %}
-    <div class="card row-between">
-      <div>
-        <strong>Content Corrector</strong>
-        <div class="muted" style="font-size:13px;">Scans your blog posts and cleans them to the writing standard (no em dashes, no AI vocabulary), meaning preserved. Gated before anything changes.</div>
-        {% if latest_correction_run and not fixing %}<div class="muted" style="font-size:13px; margin-top:6px;">{{ latest_correction_run.summary }} {% if 'drafted' in latest_correction_run.summary %}<a href="/approvals">Review →</a>{% endif %}</div>{% endif %}
-      </div>
-      <form method="post" action="/sites/{{ site.id }}/correct-content">
-        <button class="btn secondary small" type="submit" {{ 'disabled' if fixing or not content_connection_active else '' }}>
-          {{ 'Scanning…' if fixing else 'Clean up content' }}
-        </button>
-      </form>
     </div>
+  </details>
 
-    {% if drafts %}
-      <div class="card" style="padding:0; margin-top:16px;">
-        <table>
-          <thead><tr><th>Status</th><th>Title</th><th>Drafted</th></tr></thead>
-          <tbody>
-            {% for d in drafts %}
-            <tr>
-              <td>{{ d.status | badge }}</td>
-              <td>{{ d.title }}</td>
-              <td class="muted">{{ d.created_at.strftime('%Y-%m-%d %H:%M') if d.created_at else '' }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    {% else %}
-      <div class="empty" style="margin-top:8px;">No content drafted yet. The agent writes a draft; you approve it before anything reaches WordPress.</div>
-    {% endif %}
-  {% elif tab == 'settings' %}
-    {% if notice == 'saved' %}<div class="card"><p style="margin:0; color:#4f8cff;">Connection saved.</p></div>{% endif %}
-    {% if notice == 'test_ok' %}<div class="card"><p style="margin:0; color:#4ade80;">✓ Connection works — the app can reach WordPress.</p></div>{% endif %}
-    {% if notice and notice.startswith('test_fail') %}<div class="card"><div class="error">Connection failed (HTTP {{ notice.split('_')[-1] }}). Check the URL, username, application password, and that the helper plugin is installed.</div></div>{% endif %}
-    {% if notice == 'test_none' %}<div class="card"><div class="error">No connection details saved yet. Fill in and save the form below first.</div></div>{% endif %}
+  <!-- Settings (expandable) -->
+  <details class="cc-panel">
+    <summary><h2>Settings</h2></summary>
+    <div class="panel-body">
+      {% if notice == 'saved' %}<div class="notice notice-success">Connection saved.</div>{% endif %}
+      {% if notice == 'test_ok' %}<div class="notice notice-success">✓ Connection works — the app can reach WordPress.</div>{% endif %}
+      {% if notice and notice.startswith('test_fail') %}<div class="notice notice-danger">Connection failed. Check the URL, username, application password, and the helper plugin.</div>{% endif %}
 
-    <div class="card">
-      <h2>WordPress connection</h2>
-      <p class="muted" style="margin-top:0;">
-        How the agents read and update this site. Status:
-        {% if connection_active %}<strong style="color:#4ade80;">connected</strong>{% else %}<strong style="color:#ff6b6b;">not connected</strong>{% endif %}
-      </p>
+      <h3>WordPress connection
+        {% if connection_active %}<span class="badge badge-success">connected</span>{% else %}<span class="badge badge-danger">not connected</span>{% endif %}
+      </h3>
       <form method="post" action="/sites/{{ site.id }}/connection">
-        <div class="field">
-          <label for="wp_url">WordPress URL</label>
-          <input type="url" id="wp_url" name="wp_url" value="{{ connection.wp_url if connection else site.url }}" required>
-        </div>
-        <div class="field">
-          <label for="wp_username">Admin username</label>
-          <input type="text" id="wp_username" name="wp_username" value="{{ connection.wp_username if connection else '' }}" required>
-        </div>
-        <div class="field">
-          <label for="wp_app_password">Application password {% if connection and connection.wp_app_password_enc %}<span class="muted">(saved — leave blank to keep)</span>{% endif %}</label>
-          <input type="password" id="wp_app_password" name="wp_app_password" autocomplete="off" placeholder="xxxx xxxx xxxx xxxx xxxx xxxx">
-        </div>
+        <div class="field"><label for="wp_url">WordPress URL</label>
+          <input type="url" id="wp_url" name="wp_url" value="{{ connection.wp_url if connection else site.url }}" required></div>
+        <div class="field"><label for="wp_username">Admin username</label>
+          <input type="text" id="wp_username" name="wp_username" value="{{ connection.wp_username if connection else '' }}" required></div>
+        <div class="field"><label for="wp_app_password">Application password {% if connection and connection.wp_app_password_enc %}<span class="muted">(saved — leave blank to keep)</span>{% endif %}</label>
+          <input type="password" id="wp_app_password" name="wp_app_password" autocomplete="off" placeholder="xxxx xxxx xxxx xxxx xxxx xxxx"></div>
         <button class="btn" type="submit">Save connection</button>
         <button class="btn secondary" type="submit" formaction="/sites/{{ site.id }}/test-connection">Test connection</button>
       </form>
-    </div>
 
-    <div class="card">
-      <h2>Google Search Console</h2>
-      <p class="muted" style="margin-top:0;">Unlocks real ranking data (positions, click-through, striking-distance keywords) for the SEO Auditor. One connection covers all your sites.</p>
+      <h3 style="margin-top:24px;">Google Search Console</h3>
       {% if google %}
         <p>Connected{% if google.email %} as <strong>{{ google.email }}</strong>{% endif %} <span class="badge badge-success">connected</span></p>
         <form method="post" action="/google/disconnect"><button class="btn secondary small" type="submit">Disconnect</button></form>
       {% elif google_configured %}
-        <p class="muted">Not connected yet.</p>
-        <a class="btn" href="/google/connect">Connect Google</a>
+        <p class="muted">Not connected yet.</p><a class="btn" href="/google/connect">Connect Google</a>
       {% else %}
-        <div class="notice notice-muted">Google isn't set up yet. The owner needs to add the one-time OAuth client ID/secret in Railway (see the setup guide).</div>
+        <div class="notice notice-muted">Google isn't set up yet (one-time OAuth client needed in Railway).</div>
       {% endif %}
-    </div>
 
-    <div class="card">
-      <h2>Site details</h2>
-      <p class="muted">Name</p>
-      <p>{{ site.name }}</p>
-      <p class="muted">Added</p>
-      <p>{{ site.created_at.strftime('%Y-%m-%d %H:%M UTC') if site.created_at else 'unknown' }}</p>
+      <h3 style="margin-top:24px;">Automatic schedule</h3>
+      <p class="muted">{% if scheduler_enabled %}On — runs itself every {{ interval_days }} days.{% else %}Off.{% endif %}</p>
     </div>
-  {% endif %}
+  </details>
 </div>
+
+<script>
+  (function () {
+    var STATE_LABEL = {pending:'Waiting', active:'Working', done:'Done', failed:'Failed'};
+    var SUBTXT = {audit:'Scanning the site', route:'Assigning to doers', fix:'Applying changes', report:'Compiling results'};
+    var url = "/sites/{{ site.id }}/pipeline-status";
+    var timer = null, prevRunning = null, sel = null, last = {};
+
+    function esc(s){ var d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML; }
+
+    function renderDetail() {
+      var box = document.getElementById('cc-detail');
+      if (!sel) { box.style.display='none'; return; }
+      box.style.display='block';
+      if (sel === 'fix') {
+        var log = last.fix_log || [];
+        if (!log.length) { box.innerHTML = '<p class="muted">No fixes worked yet this run.</p>'; return; }
+        box.innerHTML = '<div class="log">' + log.map(function(r){
+          var col = r.status==='closed' ? '#6ee7b7' : (r.status==='in-progress' ? '#7dd3fc' : (r.status==='no-capability' ? '#99a2b5' : '#fda4af'));
+          var ic = r.status==='closed' ? '✓' : (r.status==='in-progress' ? '⏳' : (r.status==='no-capability' ? '–' : '!'));
+          return '<div class="log-row"><span class="ic" style="color:'+col+'">'+ic+'</span><div><div>'+esc(r.issue)+'</div><div style="color:'+col+'; font-size:12px;">'+esc(r.remark)+'</div></div></div>';
+        }).join('') + '</div>';
+      } else if (sel === 'audit') {
+        box.innerHTML = '<p class="muted">Crawling pages, checking links, reading content for E-E-A-T and AI-citability, and pulling Core Web Vitals. This takes 1–2 minutes.</p>';
+      } else if (sel === 'route') {
+        box.innerHTML = '<p class="muted">Classifying each finding and assigning it to the doer that owns the fix.</p>';
+      } else {
+        box.innerHTML = '<p class="muted">Compiling the scored report and the before/after summary.</p>';
+      }
+    }
+
+    function render(d) {
+      last = d;
+      (d.stages || []).forEach(function (s) {
+        var el = document.querySelector('.stage[data-stage="' + s.key + '"]');
+        if (!el) return;
+        el.className = 'stage ' + s.state + (sel === s.key ? ' sel' : '');
+        var lab = el.querySelector('[data-role=state]');
+        var sub = el.querySelector('[data-role=sub]');
+        if (s.key === 'fix' && s.state === 'active' && d.fix_total) {
+          if (lab) lab.textContent = (d.fix_done || 0) + '/' + d.fix_total;
+          var bar = el.querySelector('.bar > i');
+          if (bar) { bar.style.animation = 'none'; bar.style.width = Math.round((d.fix_done || 0) / d.fix_total * 100) + '%'; }
+          if (sub && d.fix_label) sub.textContent = d.fix_label;
+        } else {
+          if (lab) lab.textContent = STATE_LABEL[s.state] || '';
+          if (sub) sub.textContent = SUBTXT[s.key] || '';
+        }
+      });
+      var f = document.getElementById('cc-findings'); if (f) f.textContent = (d.findings == null) ? '—' : d.findings;
+      var x = document.getElementById('cc-fixes'); if (x) x.textContent = (d.fixes == null) ? '—' : d.fixes;
+      var sm = document.getElementById('cc-summary'); if (sm && d.summary) sm.textContent = d.summary;
+      var run = document.getElementById('cc-run'); if (run) { run.disabled = d.running; run.textContent = d.running ? 'Crew working…' : '▶ Run audit & fix'; }
+      if (sel) renderDetail();
+      // When a run finishes, reload once to show the fresh score / report / approvals.
+      if (prevRunning === true && !d.running) { location.reload(); return; }
+      prevRunning = d.running;
+    }
+
+    document.querySelectorAll('.stage').forEach(function (el) {
+      el.addEventListener('click', function () {
+        var k = el.getAttribute('data-stage');
+        sel = (sel === k) ? null : k;
+        document.querySelectorAll('.stage').forEach(function (s) { s.classList.toggle('sel', s.getAttribute('data-stage') === sel); });
+        renderDetail();
+      });
+    });
+
+    function poll() {
+      fetch(url, {headers: {'Accept': 'application/json'}})
+        .then(function (r) { return r.json(); })
+        .then(function (d) { render(d); if (!d.running && timer) { clearInterval(timer); timer = null; } })
+        .catch(function () {});
+    }
+    poll();
+    timer = setInterval(poll, 1500);
+  })();
+</script>
 {% endblock %}

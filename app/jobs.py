@@ -83,6 +83,13 @@ def _run_audit(site_id: int, audit_id: int, start_url: str) -> None:
         audit.grade = scored["grade"]
         audit.category_scores = json.dumps(scored["categories"])
         audit.roadmap = json.dumps(scored["roadmap"])
+        try:
+            from .brain import summarize_health
+            site = db.get(Site, site_id)
+            audit.narrative = summarize_health(site.name if site else "", scored["overall"],
+                                                scored["grade"], scored["categories"], scored["roadmap"])
+        except Exception:
+            audit.narrative = ""
 
         s = result["stats"]
         audit.status = "completed"

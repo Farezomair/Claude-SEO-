@@ -52,6 +52,7 @@ class Audit(Base):
     grade = Column(String(2), nullable=True)
     category_scores = Column(Text, nullable=True)   # JSON list
     roadmap = Column(Text, nullable=True)           # JSON list
+    narrative = Column(Text, nullable=True)         # plain-English health summary
     created_at = Column(DateTime, default=utcnow)
 
     site = relationship("Site", back_populates="audits")

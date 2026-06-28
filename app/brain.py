@@ -379,6 +379,30 @@ At most 4 findings. Only include REAL problems (omit findings if the page is str
     }
 
 
+def summarize_health(site_name: str, score: int, grade: str, categories: list, roadmap: list) -> str:
+    """One to two plain-English paragraphs: how the site is doing, where it's strong,
+    where it's weakest, and the business impact. Shown under the health score."""
+    cats = "; ".join(f"{c.get('label')} {c.get('score')}/100" for c in (categories or []))
+    tops = "; ".join(f"[{r.get('severity')}] {r.get('title')}" for r in (roadmap or [])[:6])
+    prompt = f"""You are an SEO consultant briefing a small-business owner (non-technical) on their website's SEO health. Be direct, concrete, and encouraging but honest. No jargon dumps.
+
+Site: {site_name}
+Overall health: {score}/100 (grade {grade})
+Category scores: {cats or "(none)"}
+Top issues: {tops or "(none)"}
+
+Write 1-2 short paragraphs (about 60-110 words total) that tell the owner: how the site is doing overall, what it's doing well, where it's weakest, and what the real-world impact is (visibility in Google / AI search, trust, conversions). End with the single most important thing to fix first. Plain language, second person ("your site"). No headings, no lists, no markdown."""
+    try:
+        response = _get_client().messages.create(
+            model=ANTHROPIC_MODEL, max_tokens=400,
+            system="You are a plain-spoken SEO consultant. You respond with 1-2 short paragraphs of prose only.",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return next((b.text for b in response.content if b.type == "text"), "").strip()
+    except Exception:
+        return ""
+
+
 def generate_schema_jsonld(site_name: str, url: str, homepage_text: str) -> dict:
     """Generate Organization/LocalBusiness JSON-LD from the homepage's real facts.
 

@@ -39,6 +39,7 @@ WANTED_COLUMNS = {
         "grade": "VARCHAR(2)",
         "category_scores": "TEXT",
         "roadmap": "TEXT",
+        "narrative": "TEXT",
     },
 }
 
