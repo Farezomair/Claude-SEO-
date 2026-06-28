@@ -26,6 +26,12 @@ WANTED_COLUMNS = {
         "phase": "VARCHAR(30)",
         "findings_count": "INTEGER",
         "fixes_count": "INTEGER",
+        "progress_done": "INTEGER",
+        "progress_total": "INTEGER",
+        "progress_label": "VARCHAR(300)",
+    },
+    "findings": {
+        "remark": "TEXT",
     },
     # Scored audit (rebuilt auditor).
     "audits": {

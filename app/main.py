@@ -70,7 +70,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "sweep-fixes-16"
+BUILD = "per-finding-dispatch-17"
 
 
 @app.get("/version")
@@ -88,6 +88,7 @@ _BADGE_CLASS = {
     # Finding / verification statuses
     "blocker": "danger", "critical": "danger",
     "open": "warning", "reopened": "warning", "escalated": "danger", "closed": "success",
+    "in progress": "info", "no capability": "neutral", "superseded": "neutral",
     "verified": "success", "not fixed": "danger", "partial": "warning",
     "regressed": "danger", "handed off": "neutral", "needs human input": "warning",
     # action classes
@@ -286,6 +287,10 @@ def _pipeline_state(run, report_id=None) -> dict:
         "summary": run.summary if run else "",
         "run_id": run.id if run else None,
         "report_id": report_id,
+        # One-by-one Fix-stage progress (the dispatcher fills these per finding).
+        "fix_done": run.progress_done if run else None,
+        "fix_total": run.progress_total if run else None,
+        "fix_label": run.progress_label if run else None,
     }
 
 

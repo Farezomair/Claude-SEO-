@@ -111,6 +111,10 @@ class JobRun(Base):
     phase = Column(String(30), nullable=True)         # audit/route/fix/report/done
     findings_count = Column(Integer, nullable=True)
     fixes_count = Column(Integer, nullable=True)
+    # One-by-one Fix-stage progress (the dispatcher updates these per finding).
+    progress_done = Column(Integer, nullable=True)
+    progress_total = Column(Integer, nullable=True)
+    progress_label = Column(String(300), nullable=True)
     created_at = Column(DateTime, default=utcnow)
 
 
@@ -229,7 +233,8 @@ class Finding(Base):
     action_class = Column(String(30), default="needs-approval")  # auto-safe/needs-approval/needs-human
     evidence_url = Column(String(1000), default="")
     detection_source = Column(String(50), default="crawl")
-    status = Column(String(20), default="open")      # open/closed/reopened/escalated
+    status = Column(String(20), default="open")      # open/closed/reopened/escalated/in-progress/no-capability/superseded
+    remark = Column(Text, nullable=True)             # per-line doer outcome (what was done / why not)
     created_at = Column(DateTime, default=utcnow)
 
 

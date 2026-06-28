@@ -171,7 +171,19 @@
             if (!el) return;
             el.className = 'stage ' + s.state;
             var lab = el.querySelector('[data-role=state]');
-            if (lab) lab.textContent = STATE_LABEL[s.state] || '';
+            // Fix stage: show one-by-one progress (N/total) and fill its bar proportionally.
+            if (s.key === 'fix' && s.state === 'active' && d.fix_total) {
+              if (lab) lab.textContent = (d.fix_done || 0) + '/' + d.fix_total;
+              var bar = el.querySelector('.bar > i');
+              if (bar) {
+                bar.style.animation = 'none';
+                bar.style.width = Math.round((d.fix_done || 0) / d.fix_total * 100) + '%';
+              }
+              var sub = el.querySelector('.st-sub');
+              if (sub && d.fix_label) sub.textContent = d.fix_label;
+            } else if (lab) {
+              lab.textContent = STATE_LABEL[s.state] || '';
+            }
           });
           var f = document.getElementById('cc-findings');
           var x = document.getElementById('cc-fixes');
@@ -303,16 +315,15 @@
         <h3 style="margin-top:24px;">All findings</h3>
         <div class="card" style="padding:0;">
           <table>
-            <thead><tr><th>Severity</th><th>Finding</th><th>Owner</th><th>Action</th><th>Status</th><th>Page</th></tr></thead>
+            <thead><tr><th>Severity</th><th>Finding</th><th>Owner</th><th>Status</th><th>Result</th></tr></thead>
             <tbody>
               {% for f in findings %}
               <tr>
                 <td>{{ f.severity | badge }}</td>
                 <td>{{ f.issue }}</td>
                 <td>{{ f.route }}</td>
-                <td>{{ f.action_class | badge }}</td>
                 <td>{{ f.status | badge }}</td>
-                <td class="muted">{{ f.evidence_url }}</td>
+                <td>{% if f.remark %}<span class="fres fres-{{ f.status }}">{{ f.remark }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
               </tr>
               {% endfor %}
             </tbody>

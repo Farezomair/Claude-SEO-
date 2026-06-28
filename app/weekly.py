@@ -85,7 +85,7 @@ def run_weekly(site_id: int, weekly_run_id: int) -> None:
         # Phase 4 — Dispatch: route open findings to their doers (safe fixes auto,
         # risky ones to Approvals).
         _phase("fix", findings=issue_count)
-        disp = dispatch_fixes(site_id)
+        disp = dispatch_fixes(site_id, progress_run_id=weekly_run_id)
         fixes_applied = disp["auto"]
         steps.append(disp["summary"])
 
