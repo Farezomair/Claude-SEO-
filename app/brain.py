@@ -367,7 +367,7 @@ At most 4 findings. Only include REAL problems (omit findings if the page is str
     raw = next((b.text for b in response.content if b.type == "text"), "")
     data = _extract_json(raw)
     findings = []
-    for f in (data.get("findings") or [])[:4]:
+    for f in (data.get("findings") or [])[:3]:
         cat, sev = f.get("category"), f.get("severity")
         detail = str(f.get("detail", "")).strip()
         if cat in CONTENT_CATS and sev in CONTENT_SEV and detail:

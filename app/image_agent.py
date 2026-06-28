@@ -23,8 +23,9 @@ IMG_RE = re.compile(r"<img\b[^>]*>", re.I)
 SRC_RE = re.compile(r"""\bsrc\s*=\s*["']([^"']+)["']""", re.I)
 HAS_W = re.compile(r"\bwidth\s*=", re.I)
 HAS_H = re.compile(r"\bheight\s*=", re.I)
-MAX_IMAGES = 30
+MAX_IMAGES = 8          # bounded so a page's images can't stall the run
 FETCH_BYTES = 200_000
+PER_IMAGE_TIMEOUT = 4.0
 
 
 def _img_size(data: bytes):
@@ -97,7 +98,7 @@ def _add_dims(html: str, sizes: dict) -> str:
 def _measure(base_url: str, srcs: list[str]) -> dict:
     sizes = {}
     headers = {"User-Agent": "SEO-Agent/1.0"}
-    with httpx.Client(timeout=8.0, follow_redirects=True, headers=headers) as c:
+    with httpx.Client(timeout=PER_IMAGE_TIMEOUT, follow_redirects=True, headers=headers) as c:
         for src in srcs:
             url = src if src.startswith(("http://", "https://")) else urljoin(base_url, src)
             try:

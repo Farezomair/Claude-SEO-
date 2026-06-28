@@ -188,6 +188,7 @@ def crawl_site(start_url: str) -> dict:
     schema_reported: set[str] = set()   # dedupe template-wide schema issues
     internal_paths: set[str] = set()
     ok_paths: set[str] = set()   # paths that actually returned 200 HTML (for required-page presence)
+    heading_skip = {"count": 0, "url": "", "detail": ""}  # collapse template-wide heading skips into one finding
     linked_internal: set[str] = set()   # internal URLs seen as links (for orphan detection)
     titles: dict[str, str] = {}            # url -> title (for duplicate detection)
     pages_crawled = 0
@@ -284,13 +285,16 @@ def crawl_site(start_url: str) -> dict:
                 elif len(title) < 25:
                     issues.append(_issue("title_length", "low", page_url,
                                          f"Title is short ({len(title)} chars) — wasted SERP space"))
-            # Heading hierarchy: flag a skipped level (e.g. H2 -> H4).
+            # Heading hierarchy: flag a skipped level (e.g. H2 -> H4). This is
+            # template-wide on builder sites, so count pages and report ONCE below.
             levels = [int(h.name[1]) for h in soup.find_all(re.compile(r"^h[1-6]$"))]
             prev = 0
             for lvl in levels:
                 if prev and lvl > prev + 1:
-                    issues.append(_issue("heading_hierarchy", "low", page_url,
-                                         f"Heading levels skip from H{prev} to H{lvl} — breaks document outline"))
+                    heading_skip["count"] += 1
+                    if not heading_skip["url"]:
+                        heading_skip["url"] = page_url
+                        heading_skip["detail"] = f"Heading levels skip from H{prev} to H{lvl}"
                     break
                 prev = lvl
 
@@ -508,6 +512,13 @@ def crawl_site(start_url: str) -> dict:
             if not has_tel and not PHONE_RE.search(home_soup.get_text(" ")):
                 issues.append(_issue("nap_missing", "low", origin,
                                      "No phone number / click-to-call found on the homepage — hurts local trust and conversions"))
+
+        # heading hierarchy (collapsed: one finding for the whole site)
+        if heading_skip["count"]:
+            n = heading_skip["count"]
+            suffix = f" (on {n} pages)" if n > 1 else ""
+            issues.append(_issue("heading_hierarchy", "low", heading_skip["url"],
+                                 f"{heading_skip['detail']} — breaks the document outline{suffix}"))
 
         # duplicate titles
         seen: dict[str, list[str]] = {}

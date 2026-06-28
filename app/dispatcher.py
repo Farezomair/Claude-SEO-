@@ -36,7 +36,7 @@ REWRITE_CATS = {"thin_content", "eeat_weak", "content_shallow", "content_stale",
                 "geo_unstructured", "heading_hierarchy", "missing_h1", "multiple_h1", "nap_missing"}
 REQUIRED_KEYWORDS = ("privacy", "terms", "tos", "about", "contact", "accessibility")
 MAX_AUTO_FIXES = 25   # cap live auto-writes per run (each is a Claude call)
-MAX_REWRITES = 3      # cap full-page rewrites per run (each is a big Claude call)
+MAX_REWRITES = 2      # cap full-page rewrites per run (each is a big, slow Claude call)
 
 # Honest "we can't auto-fix this yet" messages, per category. Points at the manual
 # tool where one already exists.
@@ -155,9 +155,19 @@ def _propose_required_page(db, ctx, f):
 
 
 def _propose_dedupe(db, ctx, f):
-    item = (ctx.get("items") or {}).get(_norm(f.evidence_url))
+    items = ctx.get("items") or {}
+    item = items.get(_norm(f.evidence_url))
     if not item:
-        return ("open", "Couldn't match the duplicate-title page in WordPress.", False)
+        # Fall back to matching the duplicated title text against known pages/posts.
+        import re as _re
+        m = _re.search(r'"(.+?)"', f.issue or "")
+        if m:
+            t = m.group(1).strip().lower()
+            item = next((it for it in items.values() if (it.get("title") or "").strip().lower() == t), None)
+    if not item:
+        return ("no-capability",
+                "These duplicate titles are on pages not editable via WordPress "
+                "(e.g. static blog cards) — needs manual review.", False)
     if _pending_payload_match(db, ctx["site"].id, "meta_rewrite", "page_id", item["id"]):
         return ("in-progress", "A unique-title rewrite is already waiting in Approvals.", False)
     try:
@@ -251,6 +261,7 @@ def _propose_rewrite(db, ctx, f):
         return ("in-progress",
                 "Proposed a full-page SEO rewrite (adds FAQ, quotable lead answers, tables, "
                 "fixes heading order, deepens content) → sent to Approvals.", False)
+    db.refresh(sub)  # the doer ran in its own session; pull its final summary
     return ("no-capability", f"Couldn't rewrite this page: {sub.summary}", False)
 
 
@@ -288,7 +299,8 @@ def _propose_img_dims(db, ctx, f):
     run_image_dims(ctx["site"].id, sub.id, ctx["conn"], pid, title)
     if _pending_payload_match(db, ctx["site"].id, "img_dims", "page_id", pid):
         return ("in-progress", "Measured the images and proposed width/height (stops layout shift) → Approvals.", False)
-    return ("no-capability", f"Couldn't fix images: {sub.summary}", False)
+    db.refresh(sub)  # the doer ran in its own session; pull its final summary
+    return ("no-capability", f"No image fix this run: {sub.summary}", False)
 
 
 def _human_task(db, ctx, f):

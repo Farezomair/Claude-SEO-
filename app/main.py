@@ -70,7 +70,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "single-screen-22"
+BUILD = "stability-fixes-23"
 
 
 @app.get("/version")
@@ -147,9 +147,10 @@ def _pkt(dt) -> str:
 templates.env.filters["pkt"] = _pkt
 
 
-def _mark_stale(db, run, minutes: int = 10) -> None:
+def _mark_stale(db, run, minutes: int = 20) -> None:
     """A run stuck 'running' past `minutes` (worker lost on a recycle) is failed
-    so the UI unblocks and the owner can retry."""
+    so the UI unblocks and the owner can retry. Generous because an inline run with
+    page rewrites + image measuring legitimately takes several minutes."""
     if (run and run.status == "running" and run.created_at
             and (utcnow() - run.created_at) > timedelta(minutes=minutes)):
         run.status = "failed"
