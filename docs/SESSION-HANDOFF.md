@@ -7,6 +7,52 @@ took the app from empty repo → self-running multi-agent SEO platform.
 
 ---
 
+## 0. CURRENT STATE — READ THIS FIRST (supersedes older sections below)
+
+**Ascend** = a self-running, multi-agent SEO platform. Owner is a **non-coder**
+(sam@scaledai.org / "Farez") who directs the build — explain plainly, give straight
+talk, build only what actually works. Goal: it audits a site, fixes what it safely
+can, sends risky changes to an approval gate, and keeps a score climbing.
+
+### Where it lives
+- **Live app:** https://claude-seo-production-cff6.up.railway.app
+- **Repo:** `https://github.com/Farezomair/Claude-SEO-` (branch `main`; push → Railway auto-deploys ~1-2 min)
+- **Local code:** `C:\Users\farez\Downloads\Claude Code\seo-agent`
+- **Test site:** meridianoutdoorkitchens.com (WordPress + **Elementor** + Yoast on **Hostinger**; Google Search Console connected). Site #1 in the app.
+- **Confirm a deploy is live:** `GET /version` returns `{"build": "<marker>"}`. **Latest marker: `stop-button-25`.** Bump the `BUILD` constant in `main.py` every deploy and poll `/version?x=N` (cache-bust) to confirm before telling the owner to test.
+
+### Architecture as it stands now
+- **Single-screen Command Center** is the WHOLE app (`templates/site_detail.html`). The site route forces `tab="command"`; the old tabs are gone. Layout: header (pretty site name + last-audited PKT) + action bar at top (**Run audit & fix** = `run-weekly`, **Apply fixes** = `run-fixes`, **Stop** = `stop-run`) → **clickable/expandable Pipeline** (Audit→Route→Fix→Report; click a stage for live detail; the Fix stage shows N/total + a live per-finding log) → **SEO Health** ring + grade + category bars + a 1-2 para **AI narrative** → expandable panels: **Full report** (prioritized plan + progress chart + findings with a Result column), **Approvals** (Needs-your-attention human tasks + proposals with previews), **Settings** (WP connection + Google + schedule). A JS poller hits `GET /sites/{id}/pipeline-status` every 1.5s and reloads the page once a run finishes. Container is `.container.wide`.
+- **Execution layer = the site's official WordPress Abilities API** (`wp-abilities/v1` + `/mcp`), driven HEADLESS with the stored Application Password (no relay, no OAuth). `abilities.py::AbilitiesClient` — `read()`=GET with PHP bracket-notation params, `run()`=POST `{"input":{}}` with a 405→GET fallback. 111 abilities live (Elementor editing, media, menus, LiteSpeed, plugin-install, …) — full list in `docs/abilities-catalog.md`. **WPVibe was rejected** (interactive OAuth + hosted relay) and the **custom helper-plugin v1.2 plan was dropped** in favor of this. See memories [[ascend-execution-layer]] and [[ascend-audit-rebuild]].
+- **Scored auditor:** `jobs._run_audit` = crawl (`crawler.py`) + Search Console (`gsc.py`) + Claude content/E-E-A-T/GEO (`content_analyzer.py` + `brain.analyze_page_content`, now 2 pages × ≤3 findings for stability) + Core Web Vitals via free PageSpeed/CrUX (`perf.py`). `scoring.py` → 0-100 health + A-F grade + per-category scores + an impact×effort prioritized roadmap. `brain.summarize_health` → the narrative. All stored on `Audit` (health_score/grade/category_scores/roadmap/narrative). **Each audit SUPERSEDES the prior findings** (fresh source of truth; no accumulation).
+- **Dispatcher (`dispatcher.py`) = per-finding engine.** Walks each open finding (severity order). Per finding, a handler does ONE of: **FIX** (meta title/desc via Yoast — applied inline + verified + cache-flushed), **PROPOSE** (page rewrites/images/schema generate in the BACKGROUND → land in Approvals; missing pages/dedupe/ranking generated inline → Approvals), **HUMAN** (`needs_real_data` → "Needs your attention"), or **NO-CAPABILITY** (honest remark naming what's needed). Writes `status` + `remark` on each finding (shown in the Result column + the live Fix log). Heavy generators are BACKGROUNDED so the bar never stalls. Caps: `MAX_AUTO_FIXES=25`, `MAX_REWRITES=2`. Runs from the weekly Fix phase AND the "Apply fixes" button. **Stop** sets runs to `cancelled`; the loop re-checks and halts.
+- **Doers:** SEO Technical (`seo_technical.py` — meta auto-fix + cache flush; dedupe gated), SEO On-page (`onpage_agent.py` ranking rewrites; `elementor_agent.py` full-page rewrite, gated, cache-flush, revert), Website Agent (`website_agent.py` CSS + missing-page drafts; `image_agent.py` image dimensions, gated), Content Corrector (`content_corrector.py`), Schema (`schema_agent.py` Organization/LocalBusiness JSON-LD injection, gated), Report Generator (`weekly.py`). Skill expertise harvested into `knowledge.py` (META/EEAT/GEO/SCHEMA/IMAGE guides) and injected into `brain.py` prompts (the deployed app CANNOT call the `~/.claude/skills` skills at runtime — we transplant their rules).
+- **Safety:** gated Approvals for risky writes; LiteSpeed cache flush after gated writes; one-click revert for website_css/page_rewrite/schema_inject/img_dims; `|sanitize` Jinja filter on AI/DB HTML; SameSite+Secure session cookie (`COOKIE_INSECURE=1` for local http); 180s Claude per-call timeout; 20-min stale-job guard; Stop button.
+
+### >>> OPEN ISSUES — verify/finish these first <<<
+1. **The live WRITE path is NOT yet proven on Meridian's Elementor pages.** Reads work. The owner saw the Elementor editor say *"the content area was not found… you must call the_content"* — these pages are single Elementor **HTML-widget blobs** from an AI builder whose template doesn't call `the_content` (breaks the editor; the front-end still renders the data, so our writes *should* land). NOTHING has been applied yet because every proposal is sitting **unapproved in Approvals**. **NEXT: approve ONE low-risk proposal (the image-dimensions one), confirm it applies and the page still renders.** If it fails → fix the page template (set Elementor Canvas/Full-Width via `pages-update`) or adjust `apply_html`.
+2. **On-page score = 0 and "0 fixes applied".** Was partly the heading-skip flood (now collapsed to ONE finding in the crawler). Remaining On-page=0 likely = per-page `meta_description_missing` that the meta auto-fixer should fix but reported 0 — a URL-path fallback for matching was added; **verify metas actually match a WP page and write** (or Yoast metas are already set and the 0 is other on-page findings the rewrites fix once approved).
+3. The score was **dropping/volatile each run** — mitigated (analyzer trimmed to 2 pages × 3 findings, heading flood collapsed). Confirm it's stable now.
+4. The pipeline **stalling** ("stuck at 24/60") — fixed by backgrounding heavy generators + 180s timeout + Stop. Confirm a fresh run reaches **Report** fast.
+
+### Backlog (from the 108-finding multi-agent defect sweep + roadmap)
+- **Build remaining doers:** FAQPage/HowTo schema-cleanup (strip deprecated); favicon (`wp-settings` site_icon); redirects (self-install the Redirection plugin via `plugin-install`); security headers / llms.txt (host/CDN-level, low value).
+- **Business Profile:** a one-time form for the owner's real facts (phone, address, license #, hours, prices, owner name) so doers inject REAL data — auto-resolves the `needs_real_data` human tasks.
+- **Security hardening (sweep):** full CSRF tokens (only SameSite cookie done); double-approve idempotency lock; SSRF private-IP filter in the crawler/fetchers.
+- **Detection accuracy (sweep):** header/footer false-positives on Elementor; thin-content counting `<script>` text; GSC `position=0` garbage; mixed-content false positives.
+- **Scoring:** penalty saturation in `scoring.py` (a count-aware curve so 2 vs 100 issues differ).
+- **UX:** approving from the embedded panel currently redirects to the standalone `/approvals` page (make it return to the Command Center); chart axes/labels; findings filter/pagination.
+- **Self-running loop:** the weekly scheduler already chains audit→dispatch→report; verify it and decide the auto-apply policy.
+
+### Operational
+- **Real Python:** `C:\Users\farez\AppData\Local\Programs\Python\Python312\python.exe` (WindowsApps python.exe is a fake stub — memory [[python-environment]]).
+- **Local run:** `COOKIE_INSECURE=1 WEEKLY_ENABLED=false SECRET_KEY=x APP_PASSWORD=x python -m uvicorn app.main:app --port <N>`. Import smoke-test + render templates with `templates.get_template(...).render(...)` before deploying.
+- **Deploy:** commit + `git push origin main`; new tables via `create_all`, new columns via `migrations.ensure_columns`; end commit messages with the Co-Authored-By trailer.
+- **Times** shown in **PKT (GMT+5)** via the `pkt` Jinja filter.
+- **Approval kinds:** content, required_page, content_fix, website_css, meta_rewrite, page_rewrite, schema_inject, img_dims. **Finding statuses:** open, in-progress, closed, reopened, escalated, no-capability, needs-human, snoozed, superseded.
+
+---
+
 ## 1. What this is
 **Ascend** — a self-running, multi-agent SEO platform. You add a website, it gets
 a private workspace, and a crew of Claude-powered agents audits it, fixes what
