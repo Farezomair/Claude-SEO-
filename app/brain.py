@@ -34,7 +34,9 @@ _client: anthropic.Anthropic | None = None
 def _get_client() -> anthropic.Anthropic:
     global _client
     if _client is None:
-        _client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY
+        # Hard per-call timeout + 1 retry so a single hung request can NEVER stall
+        # the whole fix pipeline (it errors, the doer records it, the loop moves on).
+        _client = anthropic.Anthropic(timeout=180.0, max_retries=1)  # reads ANTHROPIC_API_KEY
     return _client
 
 
