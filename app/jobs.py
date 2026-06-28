@@ -60,7 +60,8 @@ def _run_audit(site_id: int, audit_id: int, start_url: str) -> None:
         # across runs. Anything still wrong is re-detected below as a new finding.
         (db.query(Finding)
          .filter(Finding.site_id == site_id,
-                 Finding.status.in_(("open", "in-progress", "reopened", "escalated")))
+                 Finding.status.in_(("open", "in-progress", "reopened", "escalated",
+                                     "needs-human", "snoozed", "no-capability")))
          .update({Finding.status: "superseded"}, synchronize_session=False))
         db.commit()
 

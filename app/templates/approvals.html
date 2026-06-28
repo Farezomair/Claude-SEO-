@@ -8,6 +8,33 @@
     {% if publish_status == 'publish' %}<strong>and publishes it live</strong>{% else %}as a <strong>draft</strong> (you give it a final look and hit Publish in WordPress){% endif %}.
   </p>
 
+  {% if notice == 'task_done' %}<div class="card"><p style="margin:0; color:#4ade80;">Marked done — the next audit will re-check it.</p></div>{% endif %}
+  {% if notice == 'task_snoozed' %}<div class="card"><p style="margin:0;" class="muted">Deferred — it'll reappear after the next audit if still unfixed.</p></div>{% endif %}
+
+  {% if human_tasks %}
+    <h2 style="margin-top:8px;">Needs your attention</h2>
+    <p class="muted" style="margin-top:0;">These need a real-world fact only you can provide (a real phone number, license, address, prices) — the AI won't invent them. Each keeps reappearing after every audit until it's fixed on the site.</p>
+    {% for t in human_tasks %}
+    <div class="card" style="border-left:3px solid var(--warning);">
+      <div style="display:flex; justify-content:space-between; align-items:baseline;">
+        <strong>{{ t.site.name }}</strong>
+        <span>{{ t.finding.severity | badge }}</span>
+      </div>
+      <p style="margin:8px 0 4px;">{{ t.finding.issue }}</p>
+      {% if t.finding.evidence_url %}<p class="muted" style="margin:0; font-size:12px;">{{ t.finding.evidence_url }}</p>{% endif %}
+      <div style="display:flex; gap:8px; margin-top:14px;">
+        <form method="post" action="/findings/{{ t.finding.id }}/done">
+          <button class="btn" type="submit">Done — I fixed it</button>
+        </form>
+        <form method="post" action="/findings/{{ t.finding.id }}/snooze">
+          <button class="btn secondary" type="submit">I'll do it later</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+    <h2 style="margin-top:24px;">Approvals</h2>
+  {% endif %}
+
   {% if notice == 'approved' %}<div class="card"><p style="margin:0; color:#4ade80;">Approved and sent to WordPress.</p></div>{% endif %}
   {% if notice == 'rejected' %}<div class="card"><p style="margin:0;" class="muted">Rejected and discarded.</p></div>{% endif %}
   {% if notice == 'no_connection' %}<div class="card"><div class="error">Can't publish — that site has no WordPress connection. Set it up in the site's Settings tab.</div></div>{% endif %}

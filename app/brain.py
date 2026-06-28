@@ -325,7 +325,7 @@ Here is the page HTML to improve:
     }
 
 
-CONTENT_CATS = {"eeat_weak", "content_shallow", "content_stale", "geo_unstructured"}
+CONTENT_CATS = {"eeat_weak", "content_shallow", "content_stale", "geo_unstructured", "needs_real_data"}
 CONTENT_SEV = {"low", "medium", "high"}
 
 
@@ -351,8 +351,10 @@ Judge against this expert standard:
 
 {GEO_GUIDE}
 
+Use category "needs_real_data" when the fix requires a real-world fact only the business owner can supply and that you must NOT invent — e.g. a real phone number, license/registration number, physical address, actual prices, certifications, or real dates/years. Describe exactly what the owner should add.
+
 Respond with ONLY a JSON object, no preamble:
-{{"content_score": 0-100, "geo_score": 0-100, "findings": [{{"category": "eeat_weak|content_shallow|content_stale|geo_unstructured", "severity": "low|medium|high", "detail": "specific, actionable observation about THIS page"}}]}}
+{{"content_score": 0-100, "geo_score": 0-100, "findings": [{{"category": "eeat_weak|content_shallow|content_stale|geo_unstructured|needs_real_data", "severity": "low|medium|high", "detail": "specific, actionable observation about THIS page"}}]}}
 At most 4 findings. Only include REAL problems (omit findings if the page is strong)."""
 
     response = _get_client().messages.create(

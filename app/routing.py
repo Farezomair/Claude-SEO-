@@ -71,6 +71,8 @@ _TABLE = {
     "eeat_weak": ("content", "Content Corrector", "needs-approval"),
     "content_shallow": ("content", "Content Corrector", "needs-approval"),
     "content_stale": ("content", "Content Corrector", "needs-approval"),
+    # Real-world facts only the owner can provide -> human task (not AI-fixable).
+    "needs_real_data": ("content", "Owner", "needs-human"),
     # Performance (PageSpeed analyzer, phase 2)
     "cwv_poor": ("performance", "Website Agent", "needs-human"),
 }

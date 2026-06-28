@@ -291,9 +291,18 @@ def _propose_img_dims(db, ctx, f):
     return ("no-capability", f"Couldn't fix images: {sub.summary}", False)
 
 
+def _human_task(db, ctx, f):
+    """Owner-only fact (real phone/license/prices). Can't be AI-fixed — surface it
+    in Approvals under 'Needs your attention'. Recurs each audit until fixed."""
+    return ("needs-human",
+            "Requires your input — see “Needs your attention” in Approvals. "
+            "Keeps reappearing each audit until fixed on the site.", False)
+
+
 HANDLERS = {
     **{c: _fix_meta for c in META_CATS},
     **{c: _propose_rewrite for c in REWRITE_CATS},
+    "needs_real_data": _human_task,
     "image_no_dimensions": _propose_img_dims,
     "required_page_missing": _propose_required_page,
     "duplicate_title": _propose_dedupe,

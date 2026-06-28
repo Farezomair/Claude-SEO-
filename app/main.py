@@ -70,7 +70,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "image-doer-19"
+BUILD = "human-tasks-20"
 
 
 @app.get("/version")
@@ -999,6 +999,16 @@ def approvals(request: Request, notice: str = "", db: Session = Depends(get_db))
         .order_by(Approval.created_at.desc())
         .all()
     )
+    # "Needs your attention" — findings only a human can fix (real phone, license,
+    # prices). They recur each audit until fixed on the site.
+    human_tasks = [
+        {"finding": f, "site": s}
+        for f, s in (
+            db.query(Finding, Site).join(Site, Finding.site_id == Site.id)
+            .filter(Finding.status == "needs-human")
+            .order_by(Finding.created_at.desc()).all()
+        )
+    ]
     items = []
     for appr, site in pending:
         body, code, preview_html, text_diff = "", "", "", []
@@ -1024,8 +1034,36 @@ def approvals(request: Request, notice: str = "", db: Session = Depends(get_db))
     return templates.TemplateResponse(
         "approvals.html",
         {"request": request, "user": current_user(request), "items": items, "notice": notice,
-         "pending_count": len(items), "publish_status": CONTENT_PUBLISH_STATUS},
+         "human_tasks": human_tasks, "pending_count": len(items),
+         "publish_status": CONTENT_PUBLISH_STATUS},
     )
+
+
+@app.post("/findings/{finding_id}/done")
+def finding_done(finding_id: int, request: Request, db: Session = Depends(get_db)):
+    """Owner marks a human-task finding as handled (clears it; re-audit re-checks)."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    f = db.get(Finding, finding_id)
+    if f and f.status == "needs-human":
+        f.status = "closed"
+        f.remark = "Marked done by you — the next audit will re-check."
+        db.add(RunLog(site_id=f.site_id, message=f"Owner marked human-task #{f.id} done."))
+        db.commit()
+    return RedirectResponse("/approvals?notice=task_done", status_code=303)
+
+
+@app.post("/findings/{finding_id}/snooze")
+def finding_snooze(finding_id: int, request: Request, db: Session = Depends(get_db)):
+    """Owner defers a human-task finding (hidden now; reappears after the next audit)."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    f = db.get(Finding, finding_id)
+    if f and f.status == "needs-human":
+        f.status = "snoozed"
+        f.remark = "You chose to do this later — it will reappear after the next audit if still unfixed."
+        db.commit()
+    return RedirectResponse("/approvals?notice=task_snoozed", status_code=303)
 
 
 @app.post("/approvals/{approval_id}/approve")
