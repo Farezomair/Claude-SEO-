@@ -70,7 +70,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "rewrite-dispatch-18"
+BUILD = "image-doer-19"
 
 
 @app.get("/version")
@@ -613,7 +613,7 @@ def revert_change(site_id: int, change_id: int, request: Request, db: Session = 
     conn = get_connection(site_id, site.url, site.name)
     if conn:
         try:
-            if change.kind in ("page_rewrite", "schema_inject"):
+            if change.kind in ("page_rewrite", "schema_inject", "img_dims"):
                 client = AbilitiesClient(conn["url"], conn["username"], conn["app_password"])
                 apply_html(client, change.target_page_id, change.target_widget_id, change.old_css)
             else:
@@ -1232,6 +1232,40 @@ def approve(approval_id: int, request: Request, db: Session = Depends(get_db)):
         ))
         db.add(RunLog(site_id=site.id, message=f"Applied homepage schema: {appr.title}"))
 
+    elif appr.kind == "img_dims":
+        payload = json.loads(appr.payload or "{}")
+        change = db.get(SiteChange, payload.get("change_id"))
+        conn = get_connection(site.id, site.url, site.name)
+        if not conn or not change:
+            return RedirectResponse("/approvals?notice=no_connection", status_code=303)
+        page_id = change.target_page_id or payload.get("page_id")
+        widget_id = change.target_widget_id or payload.get("widget_id")
+        client = AbilitiesClient(conn["url"], conn["username"], conn["app_password"])
+        try:
+            method = apply_html(client, page_id, widget_id, change.css)
+        except (AbilitiesError, AbilitiesUnavailable) as exc:
+            change.status = "failed"
+            db.add(RunLog(site_id=site.id, message=f"Image-dimension fix failed for “{appr.title}”: {exc}"))
+            db.commit()
+            return RedirectResponse("/approvals?notice=publish_fail", status_code=303)
+        verified = verify_html(client, page_id, change.css)
+        change.status = "applied"
+        # Close the in-progress image-dimension finding(s); any still missing on
+        # other pages re-detect on the next audit.
+        for f in db.query(Finding).filter(
+                Finding.site_id == site.id, Finding.category == "image_no_dimensions",
+                Finding.status == "in-progress").all():
+            f.status = "closed"
+        db.add(FixRecord(
+            site_id=site.id, doer="Website Agent",
+            action_taken=f"Added image dimensions ({payload.get('count', '?')} images, via {method})",
+            page_ref=str(page_id), field="image_no_dimensions",
+            before_value="(no width/height)", after_value=f"{payload.get('count', '?')} images sized",
+            method="gate-approved", lane="gated", applied=True,
+            verification_verdict="verified" if verified else "not_fixed", status="done",
+        ))
+        db.add(RunLog(site_id=site.id, message=f"Applied image dimensions: {appr.title}"))
+
     appr.status = "approved"
     appr.decided_at = utcnow()
     db.commit()
@@ -1261,7 +1295,7 @@ def reject(approval_id: int, request: Request, db: Session = Depends(get_db)):
         finding = db.get(Finding, payload.get("finding_id")) if payload.get("finding_id") else None
         if finding:
             finding.status = "open"
-    elif appr.kind in ("website_css", "page_rewrite", "schema_inject"):
+    elif appr.kind in ("website_css", "page_rewrite", "schema_inject", "img_dims"):
         change = db.get(SiteChange, payload.get("change_id")) if payload.get("change_id") else None
         if change:
             change.status = "rejected"

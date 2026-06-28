@@ -271,9 +271,30 @@ def _handle_broken(db, ctx, f):
     return ("no-capability", NO_CAP.get(f.category, "Broken link — needs a redirects doer (not built yet)."), False)
 
 
+def _propose_img_dims(db, ctx, f):
+    """Measure images on the page and propose width/height to stop layout shift."""
+    item = (ctx.get("items") or {}).get(_norm(f.evidence_url))
+    if not item:
+        return ("no-capability", "Couldn't match this page to fix its image dimensions.", False)
+    pid, title = item["id"], item.get("title", "")
+    if _pending_payload_match(db, ctx["site"].id, "img_dims", "page_id", pid):
+        return ("in-progress", "An image-dimensions fix for this page is already in Approvals.", False)
+    from .image_agent import run_image_dims
+    sub = JobRun(site_id=ctx["site"].id, kind="image", status="running",
+                 summary=f"Measuring images on {title or pid}…")
+    db.add(sub)
+    db.commit()
+    db.refresh(sub)
+    run_image_dims(ctx["site"].id, sub.id, ctx["conn"], pid, title)
+    if _pending_payload_match(db, ctx["site"].id, "img_dims", "page_id", pid):
+        return ("in-progress", "Measured the images and proposed width/height (stops layout shift) → Approvals.", False)
+    return ("no-capability", f"Couldn't fix images: {sub.summary}", False)
+
+
 HANDLERS = {
     **{c: _fix_meta for c in META_CATS},
     **{c: _propose_rewrite for c in REWRITE_CATS},
+    "image_no_dimensions": _propose_img_dims,
     "required_page_missing": _propose_required_page,
     "duplicate_title": _propose_dedupe,
     "striking_distance": _propose_ranking,
@@ -329,7 +350,7 @@ def dispatch_fixes(site_id: int, progress_run_id: int | None = None) -> dict:
                "wp": WordPressClient(conn["url"], conn["username"], conn["app_password"]),
                "items": None}
         # Build the URL->page map once if any finding needs a page lookup.
-        lookup_cats = META_CATS | REWRITE_CATS | {"duplicate_title", "striking_distance", "low_ctr"}
+        lookup_cats = META_CATS | REWRITE_CATS | {"duplicate_title", "striking_distance", "low_ctr", "image_no_dimensions"}
         if any(f.category in lookup_cats for f in findings):
             try:
                 ctx["items"] = {_norm(it["link"]): it for it in ctx["wp"].list_content(limit=100) if it.get("link")}
