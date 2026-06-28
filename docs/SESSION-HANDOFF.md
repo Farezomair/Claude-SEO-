@@ -195,6 +195,55 @@ GEO formatting), Content Writer depth expansion, auto-dispatch in the weekly loo
 Phase F (two-part honest Report Generator), or new connectors (backlink source →
 Off-page; GBP API → Local).
 
+## 8c. LATEST SESSION (paused — resume here tomorrow)
+Big build session on top of the Abilities execution layer. All live on Railway
+(`/version` returns the current BUILD marker — last shipped: **`sweep-fixes-16`**).
+
+**Shipped this session:**
+- **Command Center** (new DEFAULT tab): left "crew" sidebar (Auditors/Doers/Reports),
+  centre pipeline Audit→Route→Fix→Report with live animated progress bars (JS polls
+  `GET /sites/{id}/pipeline-status`), SEO-health score ring + category bars + top
+  priorities, "Start full run" + "Apply fixes" buttons. The other tabs still exist
+  (Audit/Fixes/Content/Website/Reports/Settings) — owner WANTS them collapsed into a
+  quiet left-nav (the UI-restructure task, NOT yet done).
+- **Rebuilt Auditor** (`scoring.py` + expanded `crawler.py` + `content_analyzer.py`
+  + `perf.py`): 0–100 health score, A–F grade, per-category scores, impact×effort
+  prioritized fix plan. Phase-2 specialists: Claude E-E-A-T/GEO judgement on a few
+  pages, real Core Web Vitals via free PageSpeed/CrUX (keyless or PAGESPEED_API_KEY).
+- **Dispatcher** (`dispatcher.py`): routes open findings to doers — SAFE auto-applied
+  (metas, now LiteSpeed-cache-flushed, cap 25), RISKY → Approvals (dedupe titles,
+  missing pages, schema). Wired into the weekly Fix phase + the "Apply fixes" button.
+- **New doer:** Organization/LocalBusiness **schema injection** (`schema_agent.py` +
+  `brain.generate_schema_jsonld`) — generates entity JSON-LD from real homepage facts,
+  appends to the homepage Elementor html widget, gated + verified + revertible.
+- **Skill knowledge harvested** into `knowledge.py` (META/EEAT/GEO/SCHEMA/IMAGE guides
+  from the ~/.claude/skills SEO skills) and injected into doer prompts (Elementor
+  rewrite, content analyzer, meta gens, schema gen). The Railway app CANNOT run the
+  skills at runtime — we transplant their rules into prompts. See memory
+  [[ascend-audit-rebuild]] and [[ascend-execution-layer]].
+- **Reports:** "Progress over time" chart (Issues ↓ / Fixes / Health ↑), all reports
+  listed with **PKT (GMT+5)** timestamps via the `pkt` Jinja filter.
+- **Bug fixes:** required-page presence uses 200-OK pages not just links (privacy was
+  linked-but-404 → now drafted); duplicate approvals deduped + collapsed; stale-job
+  guard for fix/weekly runs.
+
+**Multi-agent defect sweep (ran via Workflow, 108 findings, verified).** Full report:
+task output `…/tasks/wj88pyz5h.output`. FIXED the top set: #2 finding-lifecycle
+stall (each audit now retires prior findings — was the root cause of "reports stay
+the same"), #1 dead Content Writer route, #4 cache-flush after ALL gated writes,
+#3 verify meta description, #14 XSS `|sanitize` filter, #13 SameSite+Secure cookie,
+#9/#10 crash guards. **Remaining backlog (not done):** full CSRF tokens, double-approve
+idempotency lock, SSRF private-IP filter; detection false-positives (header/footer on
+Elementor, thin-content counting `<script>`, GSC position=0, mixed-content); scoring
+penalty saturation (`scoring.py:73`); UI polish (findings filter/pagination, chart
+axes, ARIA, editable schedule).
+
+**>>> RESUME TOMORROW — owner to pick:** (a) keep knocking down the sweep backlog
+(detection accuracy + scoring + security), (b) build the **alt-text doer** (runner-up;
+add to dispatcher using `knowledge.IMAGE_GUIDE`), (c) the **UI restructure** (Command
+Center primary, tabs → left-nav), or (d) just re-test (Run audit → Apply fixes) now
+that the loop-stall + cache bugs are fixed and watch the chart move.
+
 ## 9. Operational details (local dev / test / deploy)
 - **Real Python:** `C:\Users\farez\AppData\Local\Programs\Python\Python312\python.exe`
   (the WindowsApps `python.exe` is a fake stub — see memory `python-environment`).
