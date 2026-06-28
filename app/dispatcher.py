@@ -16,6 +16,7 @@ import threading
 from .connections import get_connection
 from .database import SessionLocal
 from .models import Approval, Finding, FixRecord, JobRun, RunLog, Site
+from .schema_agent import run_schema_inject
 from .seo_technical import run_dedupe_titles, run_metafix
 from .website_agent import run_page_drafts
 
@@ -80,6 +81,20 @@ def dispatch_fixes(site_id: int) -> dict:
             db.commit()
             db.refresh(pr)
             run_page_drafts(site_id, pr.id)
+
+        # --- GATED lane: homepage entity/LocalBusiness schema -> Approvals ---
+        schema_pending = (
+            db.query(Approval).filter(Approval.site_id == site_id,
+                                      Approval.kind == "schema_inject",
+                                      Approval.status == "pending").count()
+        )
+        if not schema_pending and _open_count(db, site_id, {"no_entity_schema", "no_localbusiness_schema"}):
+            sj = JobRun(site_id=site_id, kind="schema", status="running",
+                        summary="Generating homepage schema…")
+            db.add(sj)
+            db.commit()
+            db.refresh(sj)
+            run_schema_inject(site_id, sj.id, conn)
 
         pending_after = (
             db.query(Approval).filter(Approval.site_id == site_id,

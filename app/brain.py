@@ -11,7 +11,7 @@ import re
 import anthropic
 
 from .content_standard import BANNED
-from .knowledge import EEAT_GUIDE, GEO_GUIDE, META_GUIDE
+from .knowledge import EEAT_GUIDE, GEO_GUIDE, META_GUIDE, SCHEMA_GUIDE
 
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-8")
 
@@ -373,6 +373,44 @@ At most 4 findings. Only include REAL problems (omit findings if the page is str
         "geo_score": int(data.get("geo_score") or 0),
         "findings": findings,
     }
+
+
+def generate_schema_jsonld(site_name: str, url: str, homepage_text: str) -> dict:
+    """Generate Organization/LocalBusiness JSON-LD from the homepage's real facts.
+
+    Returns the parsed JSON-LD object (dict). Uses only ACTIVE schema types and
+    NEVER invents facts (omits address/phone if not present in the page).
+    """
+    prompt = f"""You are a structured-data expert. Produce ONE JSON-LD object describing this business, for injection on the homepage.
+
+{SCHEMA_GUIDE}
+
+Business name: {site_name}
+Homepage URL: {url}
+
+Homepage text (extract real facts ONLY from here — do not invent):
+\"\"\"
+{homepage_text[:4500]}
+\"\"\"
+
+Build the entity:
+- Choose the most specific correct @type. If this is a local/service business, use the right LocalBusiness subtype (e.g. HomeAndConstructionBusiness, GeneralContractor, Plumber, Restaurant, etc.); otherwise Organization.
+- Include: name, url (absolute), description (one accurate sentence). Include telephone, areaServed (city/region names actually mentioned), address (PostalAddress) ONLY if those facts appear in the text — never fabricate. Include sameAs only for social/profile URLs present in the text.
+- @context must be "https://schema.org". Valid types only. No placeholder text. Absolute URLs.
+
+Respond with ONLY the JSON-LD object, no preamble, no markdown fences."""
+
+    response = _get_client().messages.create(
+        model=ANTHROPIC_MODEL, max_tokens=1500,
+        system="You are a structured-data expert. You respond only with a single valid JSON-LD object.",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw = next((b.text for b in response.content if b.type == "text"), "")
+    data = _extract_json(raw)
+    if not isinstance(data, dict) or "@type" not in data:
+        raise ValueError("Model did not return a valid JSON-LD object")
+    data.setdefault("@context", "https://schema.org")
+    return data
 
 
 def generate_css(site_name: str, site_url: str, request: str,
