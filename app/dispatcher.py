@@ -24,7 +24,7 @@ from .connections import get_connection
 from .content_standard import strip_em_dashes
 from .database import SessionLocal
 from .models import Approval, Content, Finding, FixRecord, JobRun, RunLog, Site
-from .schema_agent import run_schema_inject
+from .schema_agent import start_schema_inject_async
 from .website_agent import _page_type
 from .wordpress import YOAST_DESC_KEY, YOAST_TITLE_KEY, WordPressClient, WordPressError
 
@@ -93,7 +93,11 @@ def _pending_payload_match(db, site_id, kind, key, value) -> bool:
 
 # ---- per-finding handlers: return (new_status, remark, applied_bool) ----
 def _fix_meta(db, ctx, f):
-    item = (ctx.get("items") or {}).get(_norm(f.evidence_url))
+    items = ctx.get("items") or {}
+    item = items.get(_norm(f.evidence_url))
+    if not item:  # fallback: match by URL path only (host/scheme/www differences)
+        path = (urlparse(f.evidence_url or "").path or "/").rstrip("/").lower()
+        item = (ctx.get("items_by_path") or {}).get(path)
     if not item:
         return ("open", "Couldn't match this URL to a WordPress page to edit its meta.", False)
     if ctx["auto_used"] >= MAX_AUTO_FIXES:
@@ -223,13 +227,9 @@ def _propose_schema(db, ctx, f):
     db.add(sj)
     db.commit()
     db.refresh(sj)
-    run_schema_inject(ctx["site"].id, sj.id, ctx["conn"])
+    start_schema_inject_async(ctx["site"].id, sj.id, ctx["conn"])  # background
     ctx["schema_done"] = True
-    made = db.query(Approval).filter(Approval.site_id == ctx["site"].id, Approval.kind == "schema_inject",
-                                     Approval.status == "pending").count()
-    if made:
-        return ("in-progress", "Generated Organization/LocalBusiness schema → sent to Approvals.", False)
-    return ("open", "Couldn't generate schema this run (will retry).", False)
+    return ("in-progress", "Generating Organization/LocalBusiness schema in the background → Approvals.", False)
 
 
 def _propose_rewrite(db, ctx, f):
@@ -248,21 +248,18 @@ def _propose_rewrite(db, ctx, f):
         return ("in-progress", "A full-page SEO rewrite for this page is already waiting in Approvals.", False)
     if ctx["rewrites_used"] >= MAX_REWRITES:
         return ("open", "Queued — full-page rewrite cap reached this run; will continue next run.", False)
-    from .elementor_agent import run_page_rewrite
+    from .elementor_agent import start_page_rewrite_async
     sub = JobRun(site_id=ctx["site"].id, kind="elementor", status="running",
                  summary=f"Rewriting {title or pid}…")
     db.add(sub)
     db.commit()
     db.refresh(sub)
-    run_page_rewrite(ctx["site"].id, sub.id, ctx["conn"], pid, title)
-    if _pending_payload_match(db, ctx["site"].id, "page_rewrite", "page_id", pid):
-        ctx["rewrite_pages"].add(pid)
-        ctx["rewrites_used"] += 1
-        return ("in-progress",
-                "Proposed a full-page SEO rewrite (adds FAQ, quotable lead answers, tables, "
-                "fixes heading order, deepens content) → sent to Approvals.", False)
-    db.refresh(sub)  # the doer ran in its own session; pull its final summary
-    return ("no-capability", f"Couldn't rewrite this page: {sub.summary}", False)
+    start_page_rewrite_async(ctx["site"].id, sub.id, ctx["conn"], pid, title)  # background — don't block the bar
+    ctx["rewrite_pages"].add(pid)
+    ctx["rewrites_used"] += 1
+    return ("in-progress",
+            "Queued a full-page SEO rewrite (FAQ, quotable answers, tables, heading order, depth) — "
+            "generating in the background; it will appear in Approvals shortly.", False)
 
 
 def _handle_broken(db, ctx, f):
@@ -290,17 +287,14 @@ def _propose_img_dims(db, ctx, f):
     pid, title = item["id"], item.get("title", "")
     if _pending_payload_match(db, ctx["site"].id, "img_dims", "page_id", pid):
         return ("in-progress", "An image-dimensions fix for this page is already in Approvals.", False)
-    from .image_agent import run_image_dims
+    from .image_agent import start_image_dims_async
     sub = JobRun(site_id=ctx["site"].id, kind="image", status="running",
                  summary=f"Measuring images on {title or pid}…")
     db.add(sub)
     db.commit()
     db.refresh(sub)
-    run_image_dims(ctx["site"].id, sub.id, ctx["conn"], pid, title)
-    if _pending_payload_match(db, ctx["site"].id, "img_dims", "page_id", pid):
-        return ("in-progress", "Measured the images and proposed width/height (stops layout shift) → Approvals.", False)
-    db.refresh(sub)  # the doer ran in its own session; pull its final summary
-    return ("no-capability", f"No image fix this run: {sub.summary}", False)
+    start_image_dims_async(ctx["site"].id, sub.id, ctx["conn"], pid, title)  # background
+    return ("in-progress", "Measuring the images in the background; width/height fix will appear in Approvals.", False)
 
 
 def _human_task(db, ctx, f):
@@ -374,9 +368,11 @@ def dispatch_fixes(site_id: int, progress_run_id: int | None = None) -> dict:
         lookup_cats = META_CATS | REWRITE_CATS | {"duplicate_title", "striking_distance", "low_ctr", "image_no_dimensions"}
         if any(f.category in lookup_cats for f in findings):
             try:
-                ctx["items"] = {_norm(it["link"]): it for it in ctx["wp"].list_content(limit=100) if it.get("link")}
+                _all = [it for it in ctx["wp"].list_content(limit=100) if it.get("link")]
+                ctx["items"] = {_norm(it["link"]): it for it in _all}
+                ctx["items_by_path"] = {(urlparse(it["link"]).path or "/").rstrip("/").lower(): it for it in _all}
             except Exception:
-                ctx["items"] = {}
+                ctx["items"], ctx["items_by_path"] = {}, {}
 
         for i, f in enumerate(findings, start=1):
             _set_progress(db, run, i - 1, total, f"{f.category.replace('_', ' ')} — {(f.evidence_url or '')[:60]}")
