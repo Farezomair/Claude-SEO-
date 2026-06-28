@@ -375,6 +375,14 @@ def dispatch_fixes(site_id: int, progress_run_id: int | None = None) -> dict:
                 ctx["items"], ctx["items_by_path"] = {}, {}
 
         for i, f in enumerate(findings, start=1):
+            # Honor a Stop: if the run was cancelled, halt cleanly.
+            if run:
+                db.refresh(run)
+                if run.status == "cancelled":
+                    db.add(RunLog(site_id=site_id, message=f"Dispatch stopped at finding {i} of {total}."))
+                    db.commit()
+                    return {"auto": fixed, "proposed": proposed, "no_cap": no_cap,
+                            "summary": f"Stopped at {i}/{total}: {fixed} fixed, {proposed} queued."}
             _set_progress(db, run, i - 1, total, f"{f.category.replace('_', ' ')} — {(f.evidence_url or '')[:60]}")
             handler = HANDLERS.get(f.category)
             try:
@@ -422,7 +430,7 @@ def start_dispatch_async(site_id: int, run_id: int) -> None:
         db = SessionLocal()
         try:
             run = db.get(JobRun, run_id)
-            if run:
+            if run and run.status != "cancelled":
                 run.status = "completed"
                 run.summary = result["summary"]
                 run.fixes_count = result["auto"]

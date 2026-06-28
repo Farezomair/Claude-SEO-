@@ -21,8 +21,14 @@
       <form method="post" action="/sites/{{ site.id }}/run-fixes">
         <button class="btn secondary" type="submit" {{ 'disabled' if weekly_running or fix_running else '' }}>{{ 'Fixing…' if fix_running else 'Apply fixes' }}</button>
       </form>
+      {% if weekly_running or fix_running %}
+      <form method="post" action="/sites/{{ site.id }}/stop-run">
+        <button class="btn danger" type="submit">■ Stop</button>
+      </form>
+      {% endif %}
     </div>
   </div>
+  {% if notice == 'stopped' %}<div class="notice notice-muted">Run stopped. You can start a fresh one.</div>{% endif %}
 
   <!-- Pipeline (click a stage for live detail) -->
   <div class="card">

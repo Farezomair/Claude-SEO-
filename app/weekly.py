@@ -88,6 +88,12 @@ def run_weekly(site_id: int, weekly_run_id: int) -> None:
         disp = dispatch_fixes(site_id, progress_run_id=weekly_run_id)
         fixes_applied = disp["auto"]
         steps.append(disp["summary"])
+        db.refresh(weekly)
+        if weekly.status == "cancelled":
+            weekly.summary = "Stopped by you."
+            db.add(RunLog(site_id=site_id, message="Weekly run stopped by the owner."))
+            db.commit()
+            return
 
         # Phase 5 — Compile (report from Findings + Fix records).
         _phase("report", findings=issue_count, fixes=fixes_applied)

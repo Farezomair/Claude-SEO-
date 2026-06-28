@@ -70,7 +70,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "background-doers-24"
+BUILD = "stop-button-25"
 
 
 @app.get("/version")
@@ -933,6 +933,21 @@ def run_fixes(site_id: int, request: Request, db: Session = Depends(get_db)):
         db.refresh(run)
         start_dispatch_async(site_id, run.id)
     return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
+
+
+@app.post("/sites/{site_id}/stop-run")
+def stop_run(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """Cancel any in-flight runs for this site so the owner can start fresh."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    kinds = ("weekly", "fix", "metafix", "elementor", "image", "schema", "dedupe", "pagedraft")
+    for run in (db.query(JobRun).filter(JobRun.site_id == site_id, JobRun.kind.in_(kinds),
+                                        JobRun.status == "running").all()):
+        run.status = "cancelled"
+        run.summary = "Stopped by you."
+    db.add(RunLog(site_id=site_id, message="Run(s) stopped by the owner."))
+    db.commit()
+    return RedirectResponse(f"/sites/{site_id}?tab=command&notice=stopped", status_code=303)
 
 
 @app.post("/sites/{site_id}/rewrite-page")
