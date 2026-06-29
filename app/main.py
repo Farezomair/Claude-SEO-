@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "writepath-selftest-27"
+BUILD = "bridge3-plugin-write-28"
 
 
 @app.get("/version")
@@ -1043,7 +1043,7 @@ def write_test(site_id: int, request: Request, page_id: int = 12, db: Session = 
     then auto-revert. Returns a per-step report. Net-zero, no visible change."""
     import time as _time
     from .elementor_agent import (
-        _find_html_widget, _elementor_data_of, _set_widget_html,
+        _find_html_widget, _elementor_data_of, _set_widget_html, plugin_set_widget,
         A_UPDATE_CONTENT, A_PAGE_GET, A_PAGE_UPDATE, A_CACHE_FLUSH)
     if not current_user(request):
         return RedirectResponse("/login", status_code=303)
@@ -1073,6 +1073,12 @@ def write_test(site_id: int, request: Request, page_id: int = 12, db: Session = 
     token = f"<!-- ascend-write-test-{int(_time.time())} -->"
     marked = original + token
 
+    # Preferred path: the SEO Agent Bridge helper plugin (PHP edits _elementor_data).
+    pv = step("plugin_write", lambda: plugin_set_widget(client, page_id, widget_id, marked))
+    live0 = step("reread_plugin", lambda: _find_html_widget(client, page_id)[1])
+    result["plugin_installed"] = bool(pv) or None
+    result["plugin_works"] = bool(live0 and token in live0)
+
     step("widget_content_write", lambda: client.run(
         A_UPDATE_CONTENT, {"post_id": page_id, "widget_id": widget_id, "content": marked}))
     step("cache_flush_1", lambda: client.run(A_CACHE_FLUSH, {}))
@@ -1100,6 +1106,10 @@ def write_test(site_id: int, request: Request, page_id: int = 12, db: Session = 
     # Revert via whichever paths exist (best-effort), then confirm the marker is gone.
     def revert():
         try:
+            plugin_set_widget(client, page_id, widget_id, original)
+        except Exception:
+            pass
+        try:
             client.run(A_UPDATE_CONTENT, {"post_id": page_id, "widget_id": widget_id, "content": original})
         except Exception:
             pass
@@ -1121,7 +1131,8 @@ def write_test(site_id: int, request: Request, page_id: int = 12, db: Session = 
     step("revert", revert)
     live3 = step("reread_after_revert", lambda: _find_html_widget(client, page_id)[1])
     result["token_gone_after_revert"] = bool(live3 is not None and token not in (live3 or ""))
-    result["verdict"] = ("widget-content" if result.get("widget_content_works")
+    result["verdict"] = ("plugin" if result.get("plugin_works")
+                         else "widget-content" if result.get("widget_content_works")
                          else "elementor-data" if result.get("elementor_data_works")
                          else "NO WRITE METHOD WORKS")
     return JSONResponse({"result": result, "steps": steps})

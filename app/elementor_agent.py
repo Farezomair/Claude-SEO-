@@ -11,9 +11,10 @@ import difflib
 import json
 import threading
 
+import httpx
 from bs4 import BeautifulSoup
 
-from .abilities import AbilitiesClient, AbilitiesError, AbilitiesUnavailable
+from .abilities import AbilitiesClient, AbilitiesError, AbilitiesUnavailable, USER_AGENT
 from .brain import rewrite_page_html
 from .content_standard import scan, strip_em_dashes
 from .database import SessionLocal
@@ -96,20 +97,44 @@ def _apply_via_elementor_data(client: AbilitiesClient, page_id: int, widget_id: 
     client.run(A_PAGE_UPDATE, {"id": page_id, "meta": {"_elementor_data": json.dumps(data, ensure_ascii=False)}})
 
 
+def plugin_set_widget(client: AbilitiesClient, page_id: int, widget_id: str, html: str) -> bool:
+    """Write the widget's html via the SEO Agent Bridge helper plugin, which edits
+    `_elementor_data` in PHP (the Abilities/REST API can't) and verifies + purges
+    cache server-side. Returns True only if the plugin confirms the change is live;
+    False if the plugin isn't installed (404) or the write didn't verify, so callers
+    can fall back to the ability paths."""
+    url = f"{client.base}/wp-json/seo-agent/v1/elementor"
+    try:
+        with httpx.Client(timeout=45.0, auth=client.auth,
+                          headers={"User-Agent": USER_AGENT}, follow_redirects=True) as c:
+            r = c.post(url, json={"post_id": page_id, "widget_id": widget_id, "html": html})
+    except Exception:
+        return False
+    if r.status_code not in (200, 201):
+        return False
+    try:
+        return bool((r.json() or {}).get("verified"))
+    except Exception:
+        return False
+
+
 def apply_html(client: AbilitiesClient, page_id: int, widget_id: str, html: str,
                old_html: str | None = None) -> str:
     """Write HTML into the page's html widget. Returns the method actually used.
 
-    Tries the dedicated widget-content ability first, but then CONFIRMS the change
-    is live — that ability silently no-ops on `html` widgets (returns HTTP 200 yet
-    changes nothing), which previously made writes vanish without error. If it did
-    not land (or errored), we do a surgical edit of just this widget's node inside
-    `_elementor_data`, which is the reliable path for these pages. Both are
-    reversible via the caller's snapshot. Best-effort cache flush after.
+    Preferred path: the SEO Agent Bridge helper plugin, which edits `_elementor_data`
+    in PHP — the only thing that actually lands on these single-html-widget pages
+    (the Abilities API can't: `elementor-update-widget-content` silently no-ops on
+    html widgets and `pages-get` won't return `_elementor_data` to edit). If the
+    plugin isn't installed, fall back to the ability paths: widget-content with a
+    landed-check, then a surgical `_elementor_data` edit. Both are reversible via the
+    caller's snapshot.
 
     Pass `old_html` so the landed-check can look for the precise change (not just a
     head sample that never moves); without it we sample the body.
     """
+    if plugin_set_widget(client, page_id, widget_id, html):
+        return "plugin"
     method = "widget-content"
     landed = False
     try:
