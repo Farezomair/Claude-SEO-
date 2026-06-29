@@ -131,17 +131,22 @@ class AbilitiesClient:
         url = f"{self.base}{API_BASE}/abilities/{name}/run"
         input_data = input_data or {}
         m = method.upper()
+        # An empty {} JSON-decodes to a PHP array server-side and fails the schema's
+        # "type: object" check (e.g. litespeed-cache-flush takes no params). Send a
+        # harmless sentinel key so the body stays a non-empty object; abilities whose
+        # schema allows additional properties ignore it. Only added when truly empty.
+        body_input = input_data if input_data else {"_": True}
         with self._client() as c:
             if m == "GET":
                 r = c.get(url, params=_get_params(input_data))
             elif m in ("DELETE", "PUT", "PATCH"):
-                r = c.request(m, url, json={"input": input_data})
+                r = c.request(m, url, json={"input": body_input})
             else:
-                r = c.post(url, json={"input": input_data})
+                r = c.post(url, json={"input": body_input})
                 if r.status_code == 405 and "invalid_method" in r.text:
                     # The API tells us which verb it wants; honour GET or DELETE
                     # (send the input body on DELETE too — the handler expects it).
-                    r = (c.request("DELETE", url, json={"input": input_data}) if "DELETE" in r.text
+                    r = (c.request("DELETE", url, json={"input": body_input}) if "DELETE" in r.text
                          else c.get(url, params=_get_params(input_data)))
         if r.status_code == 404:
             raise AbilitiesUnavailable(f"Ability '{name}' not found.")
