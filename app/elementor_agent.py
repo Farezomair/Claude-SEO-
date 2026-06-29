@@ -134,8 +134,14 @@ def apply_html(client: AbilitiesClient, page_id: int, widget_id: str, html: str,
     head sample that never moves); without it we sample the body.
     """
     if plugin_set_widget(client, page_id, widget_id, html):
+        # Trigger a native page save so Hostinger/LiteSpeed auto-purges this page's
+        # server cache (the manual flush ability is unreliable / 500s here).
         try:
-            client.run(A_CACHE_FLUSH, {})  # auto-falls back to DELETE; clears LiteSpeed page cache
+            client.run(A_PAGE_UPDATE, {"id": page_id})
+        except (AbilitiesError, AbilitiesUnavailable):
+            pass
+        try:
+            client.run(A_CACHE_FLUSH, {})
         except (AbilitiesError, AbilitiesUnavailable):
             pass
         return "plugin"

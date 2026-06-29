@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "flush-queryparam-32"
+BUILD = "native-save-purge-33"
 
 
 @app.get("/version")
@@ -1131,6 +1131,8 @@ def write_test(site_id: int, request: Request, page_id: int = 12, db: Session = 
     step("revert", revert)
     live3 = step("reread_after_revert", lambda: _find_html_widget(client, page_id)[1])
     result["token_gone_after_revert"] = bool(live3 is not None and token not in (live3 or ""))
+    # Native page-save to force a server-cache purge (the path apply_html now uses).
+    step("pages_update_purge", lambda: client.run(A_PAGE_UPDATE, {"id": page_id}))
     result["verdict"] = ("plugin" if result.get("plugin_works")
                          else "widget-content" if result.get("widget_content_works")
                          else "elementor-data" if result.get("elementor_data_works")
