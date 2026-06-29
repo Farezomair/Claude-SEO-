@@ -139,8 +139,9 @@ class AbilitiesClient:
             else:
                 r = c.post(url, json={"input": input_data})
                 if r.status_code == 405 and "invalid_method" in r.text:
-                    # The API tells us which verb it wants; honour GET or DELETE.
-                    r = (c.delete(url) if "DELETE" in r.text
+                    # The API tells us which verb it wants; honour GET or DELETE
+                    # (send the input body on DELETE too — the handler expects it).
+                    r = (c.request("DELETE", url, json={"input": input_data}) if "DELETE" in r.text
                          else c.get(url, params=_get_params(input_data)))
         if r.status_code == 404:
             raise AbilitiesUnavailable(f"Ability '{name}' not found.")
