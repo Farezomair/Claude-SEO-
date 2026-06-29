@@ -125,17 +125,23 @@ class AbilitiesClient:
         Write abilities take POST with input under the `input` key. Read-only
         abilities require GET with input as a URL-encoded `input` query param; if
         a POST is rejected with 405 (rest_ability_invalid_method) we transparently
-        retry as GET, so callers don't need to know which is which.
+        retry as GET. DESTRUCTIVE abilities (e.g. litespeed-cache-flush) require
+        DELETE — pass method="DELETE" and we retry POST->DELETE on that same 405.
         """
         url = f"{self.base}{API_BASE}/abilities/{name}/run"
         input_data = input_data or {}
+        m = method.upper()
         with self._client() as c:
-            if method.upper() == "GET":
+            if m == "GET":
                 r = c.get(url, params=_get_params(input_data))
+            elif m in ("DELETE", "PUT", "PATCH"):
+                r = c.request(m, url, json={"input": input_data})
             else:
                 r = c.post(url, json={"input": input_data})
                 if r.status_code == 405 and "invalid_method" in r.text:
-                    r = c.get(url, params=_get_params(input_data))
+                    # The API tells us which verb it wants; honour GET or DELETE.
+                    r = (c.delete(url) if "DELETE" in r.text
+                         else c.get(url, params=_get_params(input_data)))
         if r.status_code == 404:
             raise AbilitiesUnavailable(f"Ability '{name}' not found.")
         if r.status_code in (401, 403):

@@ -134,6 +134,10 @@ def apply_html(client: AbilitiesClient, page_id: int, widget_id: str, html: str,
     head sample that never moves); without it we sample the body.
     """
     if plugin_set_widget(client, page_id, widget_id, html):
+        try:
+            client.run(A_CACHE_FLUSH, {})  # auto-falls back to DELETE; clears LiteSpeed page cache
+        except (AbilitiesError, AbilitiesUnavailable):
+            pass
         return "plugin"
     method = "widget-content"
     landed = False
