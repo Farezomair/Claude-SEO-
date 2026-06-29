@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "native-save-purge-33"
+BUILD = "content-diag-34"
 
 
 @app.get("/version")
@@ -1070,6 +1070,21 @@ def write_test(site_id: int, request: Request, page_id: int = 12, db: Session = 
         return JSONResponse({"result": result, "steps": steps, "verdict": "no html widget found"})
     widget_id, original = wh
     result.update(widget_id=widget_id, orig_len=len(original))
+
+    # Diagnostic: what does the page's post_content look like? (the front end may
+    # render that raw HTML rather than the Elementor widget we edit.)
+    import re as _re
+    pg = step("pages_get_content", lambda: client.read(A_PAGE_GET, {"id": page_id}))
+    if pg:
+        c = pg.get("content")
+        content = (c.get("rendered") or c.get("raw") or "") if isinstance(c, dict) else (c or "")
+        cimgs = _re.findall(r"<img\b[^>]*>", content, _re.I)
+        result["post_content_len"] = len(content)
+        result["post_content_imgs"] = len(cimgs)
+        result["post_content_imgs_sized"] = sum(
+            1 for t in cimgs if _re.search(r"\swidth\s*=", t, _re.I) and _re.search(r"\sheight\s*=", t, _re.I))
+        result["edit_mode"] = (pg.get("meta") or {}).get("_elementor_edit_mode")
+
     token = f"<!-- ascend-write-test-{int(_time.time())} -->"
     marked = original + token
 
