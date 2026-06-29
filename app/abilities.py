@@ -140,13 +140,15 @@ class AbilitiesClient:
             if m == "GET":
                 r = c.get(url, params=_get_params(input_data))
             elif m in ("DELETE", "PUT", "PATCH"):
-                r = c.request(m, url, json={"input": body_input})
+                # WP doesn't parse a JSON body on DELETE; pass input as bracket-notation
+                # query params (the same form read-only GET abilities use).
+                r = c.request(m, url, params=_get_params(body_input))
             else:
                 r = c.post(url, json={"input": body_input})
                 if r.status_code == 405 and "invalid_method" in r.text:
-                    # The API tells us which verb it wants; honour GET or DELETE
-                    # (send the input body on DELETE too — the handler expects it).
-                    r = (c.request("DELETE", url, json={"input": body_input}) if "DELETE" in r.text
+                    # The API tells us which verb it wants; honour GET or DELETE. Both
+                    # take input as query params (DELETE bodies aren't parsed by WP).
+                    r = (c.request("DELETE", url, params=_get_params(body_input)) if "DELETE" in r.text
                          else c.get(url, params=_get_params(input_data)))
         if r.status_code == 404:
             raise AbilitiesUnavailable(f"Ability '{name}' not found.")
