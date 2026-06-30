@@ -38,7 +38,7 @@ from .seo_technical import start_dedupe_async, start_metafix_async
 from .website_agent import start_change_async, start_page_drafts_async
 from .elementor_agent import (
     apply_html, copy_diff, list_elementor_pages, start_page_rewrite_async,
-    verify_change, verify_html, _find_html_widget,
+    verify_change, verify_html, _find_html_widget, read_body, write_body,
 )
 from .weekly import start_weekly_async
 from .dispatcher import start_dispatch_async
@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "meridian-body-write-36"
+BUILD = "doers-on-body-37"
 
 
 @app.get("/version")
@@ -659,10 +659,9 @@ def revert_change(site_id: int, change_id: int, request: Request, db: Session = 
         try:
             reverted_ok = True
             if change.kind in ("page_rewrite", "schema_inject", "img_dims"):
+                # Restore the previous _meridian_body (the live render source).
                 client = AbilitiesClient(conn["url"], conn["username"], conn["app_password"])
-                apply_html(client, change.target_page_id, change.target_widget_id, change.old_css,
-                           old_html=change.css)
-                reverted_ok = verify_change(client, change.target_page_id, change.css, change.old_css)
+                reverted_ok = write_body(client, change.target_page_id, change.old_css or "")
             else:
                 WordPressClient(conn["url"], conn["username"], conn["app_password"]).update_custom_css(change.old_css)
             if not reverted_ok:
@@ -1476,25 +1475,26 @@ def approve(approval_id: int, request: Request, publish: int = Form(0),
         if not conn or not change:
             return RedirectResponse(_with_notice(ret, "no_connection"), status_code=303)
         page_id = change.target_page_id or payload.get("page_id")
-        widget_id = change.target_widget_id or payload.get("widget_id")
         client = AbilitiesClient(conn["url"], conn["username"], conn["app_password"])
-        try:
-            # Snapshot the LIVE body now so revert restores the true pre-change page,
-            # not a stale propose-time copy.
-            _wid, live = _find_html_widget(client, page_id)
-            if live:
-                change.old_css = live
-            method = apply_html(client, page_id, widget_id, change.css, old_html=change.old_css)
-        except (AbilitiesError, AbilitiesUnavailable) as exc:
+        # Write the LIVE render source (_meridian_body), snapshotting it first for revert.
+        live = read_body(client, page_id)
+        if live is None:
             change.status = "failed"
-            db.add(RunLog(site_id=site.id, message=f"Page rewrite failed for “{appr.title}”: {exc}"))
+            db.add(RunLog(site_id=site.id, message=f"Page rewrite failed for “{appr.title}”: couldn't read the page body (Bridge v4+ active?)"))
             db.commit()
             return RedirectResponse(_with_notice(ret, "publish_fail"), status_code=303)
-        verified = verify_change(client, page_id, change.old_css, change.css)
+        if live:
+            change.old_css = live
+        verified = write_body(client, page_id, change.css)
+        if not verified:
+            change.status = "failed"
+            db.add(RunLog(site_id=site.id, message=f"Page rewrite write didn't verify for “{appr.title}”."))
+            db.commit()
+            return RedirectResponse(_with_notice(ret, "publish_fail"), status_code=303)
         change.status = "applied"
         db.add(FixRecord(
             site_id=site.id, doer="Elementor On-page",
-            action_taken=f"Full-page SEO rewrite of “{appr.title}” (via {method})",
+            action_taken=f"Full-page SEO rewrite of “{appr.title}” (via _meridian_body)",
             page_ref=str(page_id), field="page_html",
             before_value=(change.old_css or "")[:5000], after_value=(change.css or "")[:5000],
             method="gate-approved", lane="gated", applied=True,
@@ -1513,30 +1513,28 @@ def approve(approval_id: int, request: Request, publish: int = Form(0),
         if not conn or not change:
             return RedirectResponse(_with_notice(ret, "no_connection"), status_code=303)
         page_id = change.target_page_id or payload.get("page_id")
-        widget_id = change.target_widget_id or payload.get("widget_id")
         client = AbilitiesClient(conn["url"], conn["username"], conn["app_password"])
         jstr = payload.get("jsonld", "")
-        try:
-            # Re-read live and layer the schema onto CURRENT content, so we don't
-            # clobber other edits (e.g. image dimensions) on the same html widget.
-            _wid, live = _find_html_widget(client, page_id)
-            if live:
-                from .schema_agent import _has_entity_schema
-                change.old_css = live
-                if jstr and not _has_entity_schema(live):
-                    change.css = live + f'\n<script type="application/ld+json">\n{jstr}\n</script>\n'
-                else:
-                    change.css = live  # already has entity schema / nothing to add — no-op write
-            method = apply_html(client, page_id, widget_id, change.css, old_html=change.old_css)
-        except (AbilitiesError, AbilitiesUnavailable) as exc:
+        # Re-read the LIVE body and layer the schema onto CURRENT content so we don't
+        # clobber other edits (e.g. image dimensions) made since proposing.
+        live = read_body(client, page_id)
+        if live is None:
             change.status = "failed"
-            db.add(RunLog(site_id=site.id, message=f"Schema injection failed for “{appr.title}”: {exc}"))
+            db.add(RunLog(site_id=site.id, message=f"Schema injection failed for “{appr.title}”: couldn't read the page body (Bridge v4+ active?)"))
             db.commit()
             return RedirectResponse(_with_notice(ret, "publish_fail"), status_code=303)
-        # Real verification: confirm the JSON-LD is actually on the live page now —
-        # not just that we built a string containing it. verify_change re-reads the
-        # live widget and looks for the appended <script>, which is the distinct change.
-        verified = bool(jstr) and verify_change(client, page_id, change.old_css, change.css)
+        from .schema_agent import _has_entity_schema
+        change.old_css = live
+        if jstr and not _has_entity_schema(live):
+            change.css = live + f'\n<script type="application/ld+json">\n{jstr}\n</script>\n'
+        else:
+            change.css = live  # already has entity schema / nothing to add — no-op write
+        if not write_body(client, page_id, change.css):
+            change.status = "failed"
+            db.add(RunLog(site_id=site.id, message=f"Schema write didn't verify for “{appr.title}”."))
+            db.commit()
+            return RedirectResponse(_with_notice(ret, "publish_fail"), status_code=303)
+        verified = bool(jstr)
         change.status = "applied"
         if verified:
             for f in db.query(Finding).filter(
@@ -1546,7 +1544,7 @@ def approve(approval_id: int, request: Request, publish: int = Form(0),
                 f.status = "closed"
         db.add(FixRecord(
             site_id=site.id, doer="SEO Technical",
-            action_taken=f"Injected homepage entity schema (via {method})",
+            action_taken="Injected homepage entity schema (via _meridian_body)",
             page_ref=str(page_id), field="schema",
             before_value="(no entity schema)", after_value=payload.get("jsonld", "")[:5000],
             method="gate-approved", lane="gated", applied=True,
@@ -1564,36 +1562,34 @@ def approve(approval_id: int, request: Request, publish: int = Form(0),
         if not conn or not change:
             return RedirectResponse(_with_notice(ret, "no_connection"), status_code=303)
         page_id = change.target_page_id or payload.get("page_id")
-        widget_id = change.target_widget_id or payload.get("widget_id")
         client = AbilitiesClient(conn["url"], conn["username"], conn["app_password"])
         sizes = payload.get("sizes") or {}
-        try:
-            # Re-read live and re-inject dimensions into CURRENT content, snapshotting
-            # a true revert point (avoids clobbering other same-widget edits).
-            _wid, live = _find_html_widget(client, page_id)
-            if live:
-                change.old_css = live
-                # Re-derive against live; with no stored sizes (legacy proposal) write
-                # live back unchanged rather than the stale propose-time snapshot.
-                change.css = _add_dims(live, sizes) if sizes else live
-            method = apply_html(client, page_id, widget_id, change.css, old_html=change.old_css)
-        except (AbilitiesError, AbilitiesUnavailable) as exc:
+        # Re-read the LIVE body and re-inject dimensions into CURRENT content,
+        # snapshotting a true revert point.
+        live = read_body(client, page_id)
+        if live is None:
             change.status = "failed"
-            db.add(RunLog(site_id=site.id, message=f"Image-dimension fix failed for “{appr.title}”: {exc}"))
+            db.add(RunLog(site_id=site.id, message=f"Image-dimension fix failed for “{appr.title}”: couldn't read the page body (Bridge v4+ active?)"))
             db.commit()
             return RedirectResponse(_with_notice(ret, "publish_fail"), status_code=303)
-        verified = verify_change(client, page_id, change.old_css, change.css)
+        change.old_css = live
+        change.css = _add_dims(live, sizes) if sizes else live
+        if not write_body(client, page_id, change.css):
+            change.status = "failed"
+            db.add(RunLog(site_id=site.id, message=f"Image-dimension write didn't verify for “{appr.title}”."))
+            db.commit()
+            return RedirectResponse(_with_notice(ret, "publish_fail"), status_code=303)
+        verified = True
         change.status = "applied"
-        # Close the in-progress image-dimension finding(s) only when verified live;
-        # any still missing on other pages re-detect on the next audit.
-        if verified:
-            for f in db.query(Finding).filter(
-                    Finding.site_id == site.id, Finding.category == "image_no_dimensions",
-                    Finding.status == "in-progress").all():
-                f.status = "closed"
+        # Close the in-progress image-dimension finding(s); any still missing on
+        # other pages re-detect on the next audit.
+        for f in db.query(Finding).filter(
+                Finding.site_id == site.id, Finding.category == "image_no_dimensions",
+                Finding.status == "in-progress").all():
+            f.status = "closed"
         db.add(FixRecord(
             site_id=site.id, doer="Website Agent",
-            action_taken=f"Added image dimensions ({payload.get('count', '?')} images, via {method})",
+            action_taken=f"Added image dimensions ({payload.get('count', '?')} images, via _meridian_body)",
             page_ref=str(page_id), field="image_no_dimensions",
             before_value="(no width/height)", after_value=f"{payload.get('count', '?')} images sized",
             method="gate-approved", lane="gated", applied=True,

@@ -16,7 +16,7 @@ import httpx
 
 from .abilities import AbilitiesError, AbilitiesUnavailable
 from .database import SessionLocal
-from .elementor_agent import _find_html_widget, AbilitiesClient
+from .elementor_agent import _find_html_widget, AbilitiesClient, read_body
 from .models import Approval, JobRun, RunLog, Site, SiteChange
 
 IMG_RE = re.compile(r"<img\b[^>]*>", re.I)
@@ -121,16 +121,16 @@ def run_image_dims(site_id: int, run_id: int, conn: dict, page_id: int, page_tit
         run = db.get(JobRun, run_id)
         site = db.get(Site, site_id)
         client = AbilitiesClient(conn["url"], conn["username"], conn["app_password"])
-        try:
-            widget_id, old_html = _find_html_widget(client, page_id)
-        except (AbilitiesError, AbilitiesUnavailable) as exc:
+        # Read the LIVE render source: the _meridian_body field the theme prints.
+        old_html = read_body(client, page_id)
+        if old_html is None:
             run.status = "failed"
-            run.summary = f"Could not read the page: {exc}"
+            run.summary = "Couldn't read the page body — is SEO Agent Bridge (v4+) active?"
             db.commit()
             return
-        if not widget_id or not old_html:
-            run.status = "failed"
-            run.summary = "No editable HTML widget on this page."
+        if not old_html:
+            run.status = "completed"
+            run.summary = "Page body is empty — nothing to size."
             db.commit()
             return
 
@@ -157,7 +157,7 @@ def run_image_dims(site_id: int, run_id: int, conn: dict, page_id: int, page_tit
             site_id=site_id, kind="img_dims",
             request=f"Add dimensions to {len(sizes)} image(s) on {page_title or page_id}",
             css=new_html, old_css=old_html, status="proposed",
-            target_page_id=page_id, target_widget_id=widget_id,
+            target_page_id=page_id, target_widget_id="",
         )
         db.add(change)
         db.commit()
@@ -167,11 +167,10 @@ def run_image_dims(site_id: int, run_id: int, conn: dict, page_id: int, page_tit
             title=f"Set dimensions on {len(sizes)} image(s): {page_title or page_id}",
             summary=f"Adds width/height to {len(sizes)} image(s) to stop layout shift (CLS). "
                     "No visual change; one-click revert.",
-            # Keep `sizes` so approve can re-apply against the LIVE page (avoids
-            # clobbering any other change made to the same widget since proposing).
+            # Keep `sizes` so approve can re-apply against the LIVE body (avoids
+            # clobbering any other change made to the same page since proposing).
             payload=__import__("json").dumps({"change_id": change.id, "page_id": page_id,
-                                              "widget_id": widget_id, "count": len(sizes),
-                                              "sizes": sizes}),
+                                              "count": len(sizes), "sizes": sizes}),
             status="pending",
         ))
         run.status = "completed"

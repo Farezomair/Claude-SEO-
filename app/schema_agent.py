@@ -17,7 +17,7 @@ from .abilities import AbilitiesClient, AbilitiesError, AbilitiesUnavailable
 from .brain import generate_schema_jsonld
 from .crawler import LOCALBUSINESS_SUBTYPES
 from .database import SessionLocal
-from .elementor_agent import P, _find_html_widget, list_elementor_pages
+from .elementor_agent import P, _find_html_widget, list_elementor_pages, read_body
 from .models import Approval, Finding, JobRun, RunLog, Site, SiteChange
 
 A_SETTINGS = f"{P}/wp-settings-get"
@@ -116,16 +116,16 @@ def run_schema_inject(site_id: int, run_id: int, conn: dict) -> None:
             run.summary = "Could not identify the homepage to add schema to."
             db.commit()
             return
-        try:
-            widget_id, old_html = _find_html_widget(client, pid)
-        except (AbilitiesError, AbilitiesUnavailable) as exc:
+        # Read the LIVE render source: the _meridian_body field the theme prints.
+        old_html = read_body(client, pid)
+        if old_html is None:
             run.status = "failed"
-            run.summary = f"Could not read the homepage: {exc}"
+            run.summary = "Couldn't read the homepage body — is SEO Agent Bridge (v4+) active?"
             db.commit()
             return
-        if not widget_id or not old_html:
+        if not old_html:
             run.status = "failed"
-            run.summary = "The homepage has no editable HTML widget to attach schema to."
+            run.summary = "The homepage body is empty — nothing to attach schema to."
             db.commit()
             return
 
@@ -157,7 +157,7 @@ def run_schema_inject(site_id: int, run_id: int, conn: dict) -> None:
             site_id=site_id, kind="schema_inject",
             request=f"Add {schema_type} schema to homepage",
             css=new_html, old_css=old_html, status="proposed",
-            target_page_id=pid, target_widget_id=widget_id,
+            target_page_id=pid, target_widget_id="",
         )
         db.add(change)
         db.commit()

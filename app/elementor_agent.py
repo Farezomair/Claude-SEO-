@@ -325,18 +325,19 @@ def run_page_rewrite(site_id: int, run_id: int, conn: dict, page_id: int, page_t
             db.commit()
             return
 
-        try:
-            widget_id, old_html = _find_html_widget(client, page_id)
-        except (AbilitiesError, AbilitiesUnavailable) as exc:
+        # Read the LIVE render source: the _meridian_body field the theme prints.
+        old_html = read_body(client, page_id)
+        if old_html is None:
             run.status = "failed"
-            run.summary = f"Could not read the page: {exc}"
+            run.summary = "Couldn't read the page body — is SEO Agent Bridge (v4+) active?"
             db.commit()
             return
-        if not widget_id or not old_html:
+        if not old_html:
             run.status = "failed"
-            run.summary = f"No editable HTML widget found on page {page_id}."
+            run.summary = f"Page {page_id} body is empty."
             db.commit()
             return
+        widget_id = ""
 
         try:
             result = rewrite_page_html(site.name, site.url, page_title or str(page_id),
