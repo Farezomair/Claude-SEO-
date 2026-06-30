@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Capabilities · Ascend{% endblock %}
+{% block body %}
+<div class="container wide">
+  <p class="muted" style="margin-bottom:10px;"><a href="/sites">&larr; All websites</a></p>
+
+  <!-- AUDIT CHECKS -->
+  <div class="card" id="audit">
+    <div class="row-between">
+      <h1 style="margin:0;">Audit checks</h1>
+      <span class="muted" style="font-size:13px;">{{ audit_active_count }} of {{ audit_check_count }} checks active &middot; {{ audit_categories|length }} categories</span>
+    </div>
+    <p class="muted" style="margin:8px 0 0;">Everything Ascend scans for and grades your site on. Read-only for now — tuning each capability will live here later.</p>
+    <div class="cap-grid">
+      {% for c in audit_categories %}
+      <div class="cap-card">
+        <div class="row-between">
+          <h3 style="margin:0;">{{ c.label }}</h3>
+          <span class="pill-count">{{ c.weight }}%</span>
+        </div>
+        <p class="muted" style="font-size:13px; margin:6px 0 10px;">{{ c.desc }}</p>
+        <ul class="cap-checks">
+          {% for ck in c.checks %}
+          <li>
+            <span class="dot {{ 'on' if ck.status == 'active' else 'off' }}"></span>
+            <span>{{ ck.label }}</span>
+            {% if ck.status != 'active' %}<span class="tag-planned">planned</span>{% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- DOERS -->
+  <div class="card" id="doers">
+    <div class="row-between">
+      <h1 style="margin:0;">Doers</h1>
+      <span class="muted" style="font-size:13px;">{{ doer_count }} active &middot; {{ planned_doers|length }} planned</span>
+    </div>
+    <p class="muted" style="margin:8px 0 0;">
+      The agents that fix what the audit finds.
+      <span class="lane lane-auto">auto</span> applies &amp; verifies live;
+      <span class="lane lane-approval">approval</span> proposes a change for your yes/no.
+    </p>
+    <div class="cap-grid">
+      {% for d in doers %}
+      <div class="cap-card">
+        <div class="row-between">
+          <h3 style="margin:0;">{{ d.agent }}</h3>
+          <span class="lane lane-{{ d.lane }}">{{ d.lane }}</span>
+        </div>
+        <p class="muted" style="font-size:12px; margin:4px 0 0;">{{ d.summary }}</p>
+        <p style="font-size:13px; margin:8px 0 0;">{{ d.desc }}</p>
+      </div>
+      {% endfor %}
+    </div>
+
+    <h3 style="margin-top:22px;">Planned</h3>
+    <p class="muted" style="margin-top:-2px; font-size:13px;">On the roadmap — these flip to active as we build them.</p>
+    <div class="cap-grid">
+      {% for d in planned_doers %}
+      <div class="cap-card planned">
+        <div class="row-between">
+          <h3 style="margin:0;">{{ d.agent }}</h3>
+          <span class="lane lane-planned">planned</span>
+        </div>
+        <p class="muted" style="font-size:12px; margin:4px 0 0;">{{ d.summary }}</p>
+        <p class="muted" style="font-size:13px; margin:8px 0 0;">{{ d.desc }}</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<style>
+  .cap-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(270px, 1fr)); gap:14px; margin-top:16px; }
+  .cap-card { background:var(--panel-2); border:1px solid var(--border); border-radius:14px; padding:16px 18px; }
+  .cap-card h3 { font-size:15px; }
+  .cap-checks { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:7px; }
+  .cap-checks li { font-size:13px; display:flex; align-items:center; gap:9px; line-height:1.35; }
+  .dot { width:8px; height:8px; border-radius:50%; flex:none; }
+  .dot.on { background:#34d399; }
+  .dot.off { background:#64748b; }
+  .tag-planned { font-size:11px; color:var(--muted); margin-left:auto; }
+  .lane { font-size:11px; padding:2px 9px; border-radius:999px; font-weight:600; white-space:nowrap; }
+  .lane-auto { background:rgba(52,211,153,.16); color:#34d399; }
+  .lane-approval { background:rgba(125,211,252,.16); color:#7dd3fc; }
+  .lane-planned { background:rgba(148,163,184,.16); color:#94a3b8; }
+  .cap-card.planned { opacity:.7; }
+</style>
+{% endblock %}

@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "ui-approvals-47"
+BUILD = "powers-viewer-48"
 
 
 @app.get("/version")
@@ -1355,6 +1355,26 @@ def _approval_items(db, site_id=None) -> list:
         items.append({"approval": appr, "site": site, "body": body, "code": code,
                       "preview_html": preview_html, "text_diff": text_diff})
     return items
+
+
+@app.get("/capabilities", response_class=HTMLResponse)
+def capabilities_view(request: Request, db: Session = Depends(get_db)):
+    """Read-only viewer of Ascend's powers — what it audits and the doers that
+    fix it. Fed by the capability registry (app/capabilities.py)."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    from .capabilities import (AUDIT_CATEGORIES, DOERS, PLANNED_DOERS,
+                               DOER_COUNT, AUDIT_CHECK_COUNT, AUDIT_ACTIVE_COUNT)
+    return templates.TemplateResponse("capabilities.html", {
+        "request": request,
+        "user": current_user(request),
+        "audit_categories": AUDIT_CATEGORIES,
+        "doers": DOERS,
+        "planned_doers": PLANNED_DOERS,
+        "doer_count": DOER_COUNT,
+        "audit_check_count": AUDIT_CHECK_COUNT,
+        "audit_active_count": AUDIT_ACTIVE_COUNT,
+    })
 
 
 @app.get("/approvals", response_class=HTMLResponse)
