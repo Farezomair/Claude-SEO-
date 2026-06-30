@@ -97,6 +97,43 @@ def _apply_via_elementor_data(client: AbilitiesClient, page_id: int, widget_id: 
     client.run(A_PAGE_UPDATE, {"id": page_id, "meta": {"_elementor_data": json.dumps(data, ensure_ascii=False)}})
 
 
+def read_body(client: AbilitiesClient, page_id: int) -> str | None:
+    """Read the `_meridian_body` custom field that the child theme's
+    meridian-full-page.php template actually prints on the front end. Returns the
+    HTML string, '' if the field is empty, or None if the endpoint isn't available."""
+    url = f"{client.base}/wp-json/seo-agent/v1/body"
+    try:
+        with httpx.Client(timeout=45.0, auth=client.auth,
+                          headers={"User-Agent": USER_AGENT}, follow_redirects=True) as c:
+            r = c.get(url, params={"post_id": page_id, "include_html": 1})
+    except Exception:
+        return None
+    if r.status_code != 200:
+        return None
+    try:
+        return (r.json() or {}).get("html")
+    except Exception:
+        return None
+
+
+def write_body(client: AbilitiesClient, page_id: int, html: str) -> bool:
+    """Write `_meridian_body` (the live render source) and purge. Returns True only
+    if the plugin confirms the stored value matches what we sent."""
+    url = f"{client.base}/wp-json/seo-agent/v1/body"
+    try:
+        with httpx.Client(timeout=60.0, auth=client.auth,
+                          headers={"User-Agent": USER_AGENT}, follow_redirects=True) as c:
+            r = c.post(url, json={"post_id": page_id, "html": html})
+    except Exception:
+        return False
+    if r.status_code not in (200, 201):
+        return False
+    try:
+        return bool((r.json() or {}).get("verified"))
+    except Exception:
+        return False
+
+
 def plugin_set_widget(client: AbilitiesClient, page_id: int, widget_id: str, html: str) -> bool:
     """Write the widget's html via the SEO Agent Bridge helper plugin, which edits
     `_elementor_data` in PHP (the Abilities/REST API can't) and verifies + purges

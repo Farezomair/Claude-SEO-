@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "render-source-diag-35"
+BUILD = "meridian-body-write-36"
 
 
 @app.get("/version")
@@ -1160,6 +1160,58 @@ def write_test(site_id: int, request: Request, page_id: int = 12, db: Session = 
                          else "widget-content" if result.get("widget_content_works")
                          else "elementor-data" if result.get("elementor_data_works")
                          else "NO WRITE METHOD WORKS")
+    return JSONResponse({"result": result, "steps": steps})
+
+
+@app.get("/sites/{site_id}/body-test")
+def body_test(site_id: int, request: Request, page_id: int = 12, db: Session = Depends(get_db)):
+    """Prove the REAL render path end-to-end: write an INVISIBLE marker into the
+    `_meridian_body` field the theme prints, confirm it appears on the PUBLIC page
+    (so the field renders + cache purges), then revert. Net-zero."""
+    import time as _time
+    import re as _re
+    import httpx as _httpx
+    from .elementor_agent import read_body, write_body
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return JSONResponse({"error": "site not found"}, status_code=404)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return JSONResponse({"error": "no WordPress connection"}, status_code=400)
+    client = AbilitiesClient(conn["url"], conn["username"], conn["app_password"])
+    steps, result = [], {"page_id": page_id}
+
+    def step(name, fn):
+        try:
+            r = fn(); steps.append({"step": name, "ok": True}); return r
+        except Exception as e:
+            steps.append({"step": name, "ok": False, "error": f"{e.__class__.__name__}: {str(e)[:200]}"}); return None
+
+    original = step("read_body", lambda: read_body(client, page_id))
+    if original is None:
+        return JSONResponse({"result": result, "steps": steps,
+                             "verdict": "body endpoint unavailable — is SEO Agent Bridge 4 active?"})
+    result["body_len"] = len(original)
+    token = f"<!-- ascend-body-test-{int(_time.time())} -->"
+    marked = original + token
+
+    result["write_verified"] = bool(step("write_body_marked", lambda: write_body(client, page_id, marked)))
+
+    def public_has():
+        with _httpx.Client(timeout=20, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0"}) as hc:
+            r = hc.get(site.url)
+            return {"token_live": token in r.text, "ls_cache": r.headers.get("x-litespeed-cache", ""),
+                    "bytes": len(r.text)}
+    result["public"] = step("public_fetch", public_has)
+
+    step("revert_body", lambda: write_body(client, page_id, original))
+    chk = step("read_after_revert", lambda: read_body(client, page_id))
+    result["reverted_clean"] = bool(chk is not None and token not in chk)
+    result["verdict"] = ("RENDERS LIVE (body field is the source)"
+                         if (result.get("public") or {}).get("token_live")
+                         else "wrote+verified in field, but NOT visible on public page (cache?)")
     return JSONResponse({"result": result, "steps": steps})
 
 
