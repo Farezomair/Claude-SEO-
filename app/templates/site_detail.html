@@ -18,9 +18,10 @@
       <form method="post" action="/sites/{{ site.id }}/run-weekly">
         <button class="btn big" id="cc-run" type="submit" {{ 'disabled' if weekly_running else '' }}>{{ 'Crew working…' if weekly_running else '▶ Run audit & fix' }}</button>
       </form>
-      <form method="post" action="/sites/{{ site.id }}/run-fixes">
-        <button class="btn secondary" type="submit" {{ 'disabled' if weekly_running or fix_running else '' }}>{{ 'Fixing…' if fix_running else 'Apply fixes' }}</button>
-      </form>
+      <button class="btn secondary" type="button" id="cc-approvals-btn"
+              onclick="var p=document.getElementById('approvals-panel'); if(p){p.open=true; p.scrollIntoView({behavior:'smooth', block:'start'});}">
+        Approvals{% if approval_items %} <span class="pill-count" id="cc-approvals-count">{{ approval_items|length }}</span>{% endif %}
+      </button>
       {% if weekly_running or fix_running %}
       <form method="post" action="/sites/{{ site.id }}/stop-run">
         <button class="btn danger" type="submit">■ Stop</button>
@@ -148,7 +149,7 @@
   {% endif %}
 
   <!-- Approvals (expandable) -->
-  <details class="cc-panel" {{ 'open' if (human_tasks or approval_items) else '' }}>
+  <details class="cc-panel" id="approvals-panel" {{ 'open' if (human_tasks or approval_items) else '' }}>
     <summary><h2>Approvals</h2>{% if approval_items %}<span class="pill-count" style="margin-left:6px;">{{ approval_items|length }}</span>{% endif %}{% if human_tasks %}<span class="muted" style="font-size:12px; margin-left:8px;">{{ human_tasks|length }} need you</span>{% endif %}</summary>
     <div class="panel-body">
       {% if not human_tasks and not approval_items %}
