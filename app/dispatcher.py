@@ -232,6 +232,22 @@ def _propose_schema(db, ctx, f):
     return ("in-progress", "Generating Organization/LocalBusiness schema in the background → Approvals.", False)
 
 
+def _propose_technical(db, ctx, f):
+    """Server-level technical fixes (security headers, llms.txt) via the Bridge
+    plugin — auto-applied + verified live, once per run."""
+    if ctx.get("tech_done"):
+        return ("in-progress", "Covered by the technical fix running this run (security headers + llms.txt).", False)
+    from .technical_agent import start_technical_async
+    tj = JobRun(site_id=ctx["site"].id, kind="technical", status="running", summary="Applying technical fixes…")
+    db.add(tj)
+    db.commit()
+    db.refresh(tj)
+    start_technical_async(ctx["site"].id, tj.id, ctx["conn"])  # background, auto-applies + verifies
+    ctx["tech_done"] = True
+    return ("in-progress",
+            "Applying server-level technical fixes (security headers + llms.txt) — auto, verified live, reversible.", False)
+
+
 def _propose_rewrite(db, ctx, f):
     """Propose ONE full-page SEO rewrite per page — fixes FAQ/quotable answers/
     tables/depth/headings together. Reuses the existing Elementor rewrite doer."""
@@ -314,6 +330,8 @@ HANDLERS = {
     "low_ctr": _propose_ranking,
     "no_entity_schema": _propose_schema,
     "no_localbusiness_schema": _propose_schema,
+    "security_headers": _propose_technical,
+    "no_llms_txt": _propose_technical,
     "broken_link": _handle_broken,
     "broken_page": _handle_broken,
 }
