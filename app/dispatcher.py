@@ -285,16 +285,14 @@ def _propose_img_dims(db, ctx, f):
     if not item:
         return ("no-capability", "Couldn't match this page to fix its image dimensions.", False)
     pid, title = item["id"], item.get("title", "")
-    if _pending_payload_match(db, ctx["site"].id, "img_dims", "page_id", pid):
-        return ("in-progress", "An image-dimensions fix for this page is already in Approvals.", False)
     from .image_agent import start_image_dims_async
     sub = JobRun(site_id=ctx["site"].id, kind="image", status="running",
                  summary=f"Measuring images on {title or pid}…")
     db.add(sub)
     db.commit()
     db.refresh(sub)
-    start_image_dims_async(ctx["site"].id, sub.id, ctx["conn"], pid, title)  # background
-    return ("in-progress", "Measuring the images in the background; width/height fix will appear in Approvals.", False)
+    start_image_dims_async(ctx["site"].id, sub.id, ctx["conn"], pid, title)  # background, auto-applies
+    return ("in-progress", "Measuring the images and auto-adding width/height to the live page (invisible, revertible).", False)
 
 
 def _human_task(db, ctx, f):

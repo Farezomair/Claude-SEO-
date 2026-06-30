@@ -167,8 +167,7 @@ def run_schema_inject(site_id: int, run_id: int, conn: dict) -> None:
             title=f"Add {schema_type} schema to homepage",
             summary="Adds Organization/LocalBusiness structured data so Google and AI "
                     "assistants understand your business. Invisible on the page; one-click revert.",
-            payload=json.dumps({"change_id": change.id, "page_id": pid,
-                                "widget_id": widget_id, "jsonld": jstr}),
+            payload=json.dumps({"change_id": change.id, "page_id": pid, "jsonld": jstr}),
             status="pending",
         ))
         _close_entity_findings(db, site_id)  # in-progress until approved

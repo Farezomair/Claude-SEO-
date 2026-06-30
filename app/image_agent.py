@@ -16,8 +16,8 @@ import httpx
 
 from .abilities import AbilitiesError, AbilitiesUnavailable
 from .database import SessionLocal
-from .elementor_agent import _find_html_widget, AbilitiesClient, read_body
-from .models import Approval, JobRun, RunLog, Site, SiteChange
+from .elementor_agent import _find_html_widget, AbilitiesClient, read_body, write_body
+from .models import Approval, Finding, FixRecord, JobRun, RunLog, Site, SiteChange
 
 IMG_RE = re.compile(r"<img\b[^>]*>", re.I)
 SRC_RE = re.compile(r"""\bsrc\s*=\s*["']([^"']+)["']""", re.I)
@@ -153,28 +153,33 @@ def run_image_dims(site_id: int, run_id: int, conn: dict, page_id: int, page_tit
             db.commit()
             return
 
+        # AUTO-APPLY: image dimensions are invisible (CSS still controls displayed
+        # size) and one-click revertible, so we write them straight to the live body
+        # rather than gating. Risky edits (rewrites, new pages) still go to Approvals.
+        ok = write_body(client, page_id, new_html)
         change = SiteChange(
             site_id=site_id, kind="img_dims",
             request=f"Add dimensions to {len(sizes)} image(s) on {page_title or page_id}",
-            css=new_html, old_css=old_html, status="proposed",
+            css=new_html, old_css=old_html, status="applied" if ok else "failed",
             target_page_id=page_id, target_widget_id="",
         )
         db.add(change)
-        db.commit()
-        db.refresh(change)
-        db.add(Approval(
-            site_id=site_id, kind="img_dims",
-            title=f"Set dimensions on {len(sizes)} image(s): {page_title or page_id}",
-            summary=f"Adds width/height to {len(sizes)} image(s) to stop layout shift (CLS). "
-                    "No visual change; one-click revert.",
-            # Keep `sizes` so approve can re-apply against the LIVE body (avoids
-            # clobbering any other change made to the same page since proposing).
-            payload=__import__("json").dumps({"change_id": change.id, "page_id": page_id,
-                                              "count": len(sizes), "sizes": sizes}),
-            status="pending",
-        ))
+        if ok:
+            for f in db.query(Finding).filter(
+                    Finding.site_id == site_id, Finding.category == "image_no_dimensions",
+                    Finding.status.in_(("open", "in-progress"))).all():
+                f.status = "closed"
+                f.remark = f"Auto-fixed: width/height added to {len(sizes)} image(s) (live)."
+            db.add(FixRecord(
+                site_id=site_id, doer="Website Agent", field="image_no_dimensions",
+                action_taken=f"Auto-added dimensions to {len(sizes)} image(s) on {page_title or page_id} (via _meridian_body)",
+                page_ref=str(page_id), before_value="(no width/height)",
+                after_value=f"{len(sizes)} images sized", method="auto-safe", lane="autonomous",
+                applied=True, verification_verdict="verified", status="done",
+            ))
         run.status = "completed"
-        run.summary = f"Proposed dimensions for {len(sizes)} image(s) — waiting for approval."
+        run.summary = (f"Auto-applied dimensions for {len(sizes)} image(s) on {page_title or page_id} — live."
+                       if ok else "Image-dimension write didn't verify.")
         db.add(RunLog(site_id=site_id, message=run.summary))
         db.commit()
     except Exception as exc:

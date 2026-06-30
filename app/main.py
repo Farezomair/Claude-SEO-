@@ -72,12 +72,13 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "doers-on-body-37"
+BUILD = "autopilot-imgdims-38"
 
 
 @app.get("/version")
 def version():
-    return JSONResponse({"build": BUILD})
+    return JSONResponse({"build": BUILD, "auto_pilot": SCHEDULER_ENABLED,
+                         "weekly_interval_days": INTERVAL_DAYS})
 
 # Map a status string to a colored badge.
 _BADGE_CLASS = {
