@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "footer-links-45"
+BUILD = "footer-links-46"
 
 
 @app.get("/version")
@@ -946,6 +946,34 @@ def run_fixes(site_id: int, request: Request, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(run)
         start_dispatch_async(site_id, run.id)
+    return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
+
+
+@app.post("/sites/{site_id}/run-links")
+def run_links(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """Internal-linking doer only: link orphaned required pages into the footer
+    (published but reachable from no internal link), verify live, close findings."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return RedirectResponse(f"/sites/{site_id}?tab=settings&notice=test_none", status_code=303)
+    already = (
+        db.query(JobRun)
+        .filter(JobRun.site_id == site_id, JobRun.kind == "linking", JobRun.status == "running")
+        .first()
+    )
+    if not already:
+        run = JobRun(site_id=site_id, kind="linking", status="running",
+                     summary="Linking orphaned pages into the footer…")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        from .link_agent import start_footer_links_async
+        start_footer_links_async(site_id, run.id, conn)
     return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
 
 
