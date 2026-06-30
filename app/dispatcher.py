@@ -133,29 +133,45 @@ def _fix_meta(db, ctx, f):
             True)
 
 
+_PUBLISH_INSTR = (
+    "This page will be PUBLISHED immediately. Write complete, professional, "
+    "publication-ready content with NO visible [bracketed] placeholders. If it is a "
+    "legal page (privacy/terms), open with a one-line notice that this is a general "
+    "template the owner should review with a professional, then write sensible generic "
+    "terms — never invent specific facts, addresses, or numbers.")
+
+
 def _propose_required_page(db, ctx, f):
+    """Auto-create AND publish the missing required page at its conventional slug
+    (privacy/terms/about/contact/accessibility). Publishing resolves both the
+    required-page finding and any broken link that pointed at that 404'd URL."""
     page_type = _page_type(f.issue)
-    if _pending_payload_match(db, ctx["site"].id, "required_page", "page_type", page_type):
-        return ("in-progress", f"A {page_type} page draft is already waiting in Approvals.", False)
+    if "existing_slugs" not in ctx:
+        try:
+            ctx["existing_slugs"] = ctx["wp"].page_slugs()
+        except Exception:
+            ctx["existing_slugs"] = set()
+    published = ctx.setdefault("pages_published", set())
+    if page_type in published or page_type in ctx["existing_slugs"]:
+        return ("closed", f"A {page_type} page already exists at /{page_type}.", False)
     try:
-        page = generate_page(ctx["site"].name, ctx["site"].url, page_type)
+        page = generate_page(ctx["site"].name, ctx["site"].url, page_type, instructions=_PUBLISH_INSTR)
     except Exception as exc:
-        return ("escalated", f"Page draft failed ({exc.__class__.__name__}).", False)
+        return ("escalated", f"Page generation failed ({exc.__class__.__name__}).", False)
     if not page.get("title") or not page.get("body_html"):
-        return ("open", "Draft came back empty; will retry next run.", False)
-    content = Content(site_id=ctx["site"].id, title=page["title"],
-                      body=strip_em_dashes(page["body_html"]), status="draft")
-    db.add(content)
-    db.commit()
-    db.refresh(content)
-    summary = "New page draft — review before publishing."
-    if page.get("legal"):
-        summary += " Legal template — review with a professional and fill the [bracketed] placeholders."
-    db.add(Approval(site_id=ctx["site"].id, kind="required_page",
-                    title=f"Create {page_type} page: {page['title']}", summary=summary,
-                    payload=json.dumps({"content_id": content.id, "finding_id": f.id, "page_type": page_type}),
-                    status="pending"))
-    return ("in-progress", f"Drafted a {page_type} page → sent to Approvals for your sign-off.", False)
+        return ("open", "Page came back empty; will retry next run.", False)
+    try:
+        result = ctx["wp"].create_page(page["title"], strip_em_dashes(page["body_html"]),
+                                       status="publish", slug=page_type)
+    except WordPressError as exc:
+        return ("escalated", f"Publishing the {page_type} page failed: {exc}", False)
+    published.add(page_type)
+    ctx["existing_slugs"].add(result.get("slug") or page_type)
+    _fixrecord(db, ctx, f, "Website Agent", f"Created + published the {page_type} page",
+               after=(result.get("link", "") or f"/{page_type}")[:500], method="auto-safe")
+    return ("closed",
+            f"Auto-created + published the {page_type} page (live at /{result.get('slug', page_type)}) — "
+            "clears the missing-page finding and the broken link to it.", True)
 
 
 def _propose_dedupe(db, ctx, f):
@@ -286,9 +302,9 @@ def _handle_broken(db, ctx, f):
     kw = next((k for k in REQUIRED_KEYWORDS if k in path), None)
     if kw:
         kw = "terms" if kw == "tos" else kw
-        return ("no-capability",
-                f"This 404 is the missing {kw} page — it clears once the {kw} page draft "
-                f"in Approvals is published.", False)
+        return ("in-progress",
+                f"This 404 is the missing {kw} page — the {kw} page is being auto-created and "
+                f"published, so this link resolves on the next audit.", False)
     if "blocks automated checks" in issue or "403" in issue:
         return ("no-capability",
                 "External link that blocks bots; it works for real visitors — no action needed.", False)

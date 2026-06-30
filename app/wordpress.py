@@ -113,20 +113,36 @@ class WordPressClient:
         """Create a blog post. status 'draft' keeps it private until published in WP."""
         return self._create("posts", title, content_html, status, excerpt)
 
-    def create_page(self, title: str, content_html: str, status: str = "draft") -> dict:
-        """Create a WordPress page (e.g. a missing privacy/about page) as a draft."""
-        return self._create("pages", title, content_html, status, "")
+    def create_page(self, title: str, content_html: str, status: str = "draft", slug: str = "") -> dict:
+        """Create a WordPress page (e.g. a missing privacy/about page). Pass `slug`
+        to control the URL (so a published page resolves the link that 404'd)."""
+        return self._create("pages", title, content_html, status, "", slug)
 
-    def _create(self, kind: str, title: str, content_html: str, status: str, excerpt: str) -> dict:
+    def page_slugs(self) -> set:
+        """Existing page slugs (published or draft) — to avoid creating duplicates."""
+        slugs = set()
+        with self._client() as c:
+            r = c.get(f"{self.base}/wp-json/wp/v2/pages",
+                      params={"per_page": 100, "status": "publish,draft,pending", "_fields": "slug"})
+            if r.status_code == 200:
+                for it in (r.json() or []):
+                    if it.get("slug"):
+                        slugs.add(it["slug"])
+        return slugs
+
+    def _create(self, kind: str, title: str, content_html: str, status: str, excerpt: str, slug: str = "") -> dict:
         payload = {"title": title, "content": content_html, "status": status}
         if excerpt:
             payload["excerpt"] = excerpt
+        if slug:
+            payload["slug"] = slug
         with self._client() as c:
             r = c.post(f"{self.base}/wp-json/wp/v2/{kind}", json=payload)
         if r.status_code not in (200, 201):
             raise WordPressError(f"HTTP {r.status_code}: {r.text[:200]}")
         data = r.json() or {}
-        return {"id": data.get("id"), "link": data.get("link", ""), "status": data.get("status", status)}
+        return {"id": data.get("id"), "link": data.get("link", ""),
+                "status": data.get("status", status), "slug": data.get("slug", slug)}
 
     def update_content(self, kind: str, item_id: int, content_html: str) -> None:
         """Replace a post/page's content body (used by the Content Corrector)."""
