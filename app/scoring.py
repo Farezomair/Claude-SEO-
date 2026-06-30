@@ -60,8 +60,24 @@ def _grade(score: int) -> str:
     return "F"
 
 
-def compute(issues: list[dict], measured: set | None = None) -> dict:
-    """Score a list of issue dicts (category, severity, url, detail)."""
+# Categories whose findings are inherently PER-PAGE (one bad page = one finding):
+# their penalty is normalized by the number of pages examined, so auditing MORE
+# pages can't mechanically tank the score — it measures average per-page quality.
+# Site-level categories (a single robots.txt / sitemap / site-wide schema issue)
+# are not page-scaled, so they accumulate as-is.
+PER_PAGE = {"content", "geo", "images", "onpage"}
+
+
+def compute(issues: list[dict], measured: set | None = None, content_pages: int = 1,
+            crawl_pages: int = 1) -> dict:
+    """Score a list of issue dicts (category, severity, url, detail).
+
+    `content_pages` = how many pages the Claude content/GEO analyzer judged;
+    `crawl_pages`  = how many pages the crawler examined (on-page/images). Per-page
+    categories are scored on issue DENSITY (penalty ÷ pages examined) so the number
+    is independent of how wide we looked — it reflects the live site's quality, not
+    finding volume. Scores come only from re-detected findings; nothing here credits
+    a fix we claim to have made."""
     measured = measured if measured is not None else MEASURED
     pen = {k: 0 for k, _, _ in CATEGORIES}
     count = {k: 0 for k, _, _ in CATEGORIES}
@@ -70,7 +86,7 @@ def compute(issues: list[dict], measured: set | None = None) -> dict:
         cls = classify(iss["category"])
         cat = CATEGORY_OF_GROUP.get(cls["group"], "technical")
         sev = iss.get("severity", "low")
-        pen[cat] = min(100, pen[cat] + SEVERITY_PENALTY.get(sev, 3))
+        pen[cat] += SEVERITY_PENALTY.get(sev, 3)  # accumulate raw; normalize below
         count[cat] += 1
         enriched.append({
             "detail": iss.get("detail", ""), "severity": sev, "url": iss.get("url", ""),
@@ -78,11 +94,14 @@ def compute(issues: list[dict], measured: set | None = None) -> dict:
             "impact": SEVERITY_IMPACT.get(sev, 1), "effort": EFFORT.get(cls["action_class"], 2),
         })
 
+    denom = {"content": max(1, content_pages), "geo": max(1, content_pages),
+             "images": max(1, crawl_pages), "onpage": max(1, crawl_pages)}
     cats = []
     for key, label, weight in CATEGORIES:
         if key not in measured:
             continue
-        score = max(0, 100 - pen[key])
+        effective = pen[key] / denom[key] if key in PER_PAGE else pen[key]
+        score = max(0, round(100 - effective))
         cats.append({"key": key, "label": label, "score": score,
                      "grade": _grade(score), "weight": weight, "count": count[key]})
     total_w = sum(c["weight"] for c in cats) or 1.0

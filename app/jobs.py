@@ -43,10 +43,13 @@ def _run_audit(site_id: int, audit_id: int, start_url: str) -> None:
         # Phase 2 specialists (best-effort; never break the audit).
         measured = set(MEASURED)
         site = db.get(Site, site_id)
+        content_pages = 1
         try:
-            all_issues += analyze_site_content(start_url, site.name if site else "")
+            _c_issues, content_pages = analyze_site_content(start_url, site.name if site else "")
+            all_issues += _c_issues
+            content_pages = max(1, content_pages)
         except Exception:
-            pass
+            content_pages = 1
         try:
             perf_issues, perf_ok = analyze_performance(start_url)
             all_issues += perf_issues
@@ -77,8 +80,11 @@ def _run_audit(site_id: int, audit_id: int, start_url: str) -> None:
                 evidence_url=iss["url"], detection_source=iss.get("detection_source", "crawl"),
                 status="open",
             ))
-        # Score the audit (the rebuilt auditor: graded + prioritized, not a flat list).
-        scored = compute_score(all_issues, measured)
+        # Score the audit. Per-page categories are scored on issue DENSITY, so the
+        # number reflects the live site's quality independently of how many pages we
+        # examined (no credit for fixes we claim — only what's re-detected now).
+        crawl_pages = max(1, result["stats"].get("pages_crawled", 1))
+        scored = compute_score(all_issues, measured, content_pages=content_pages, crawl_pages=crawl_pages)
         audit.health_score = scored["overall"]
         audit.grade = scored["grade"]
         audit.category_scores = json.dumps(scored["categories"])
