@@ -36,7 +36,7 @@ REWRITE_CATS = {"thin_content", "eeat_weak", "content_shallow", "content_stale",
                 "geo_unstructured", "heading_hierarchy", "missing_h1", "multiple_h1", "nap_missing"}
 REQUIRED_KEYWORDS = ("privacy", "terms", "tos", "about", "contact", "accessibility")
 MAX_AUTO_FIXES = 25   # cap live auto-writes per run (each is a Claude call)
-MAX_REWRITES = 2      # cap full-page rewrites per run (each is a big, slow Claude call)
+MAX_REWRITES = 20     # cap full-page rewrites per run; a semaphore bounds concurrency
 
 # Honest "we can't auto-fix this yet" messages, per category. Points at the manual
 # tool where one already exists.
@@ -258,8 +258,8 @@ def _propose_rewrite(db, ctx, f):
     ctx["rewrite_pages"].add(pid)
     ctx["rewrites_used"] += 1
     return ("in-progress",
-            "Queued a full-page SEO rewrite (FAQ, quotable answers, tables, heading order, depth) — "
-            "generating in the background; it will appear in Approvals shortly.", False)
+            "Generating a full-page SEO rewrite (FAQ, quotable answers, tables, heading order, depth) in the "
+            "background — auto-applies to the live page if the safety checks pass, otherwise lands in Approvals.", False)
 
 
 def _handle_broken(db, ctx, f):

@@ -17,8 +17,8 @@ from .abilities import AbilitiesClient, AbilitiesError, AbilitiesUnavailable
 from .brain import generate_schema_jsonld
 from .crawler import LOCALBUSINESS_SUBTYPES
 from .database import SessionLocal
-from .elementor_agent import P, _find_html_widget, list_elementor_pages, read_body
-from .models import Approval, Finding, JobRun, RunLog, Site, SiteChange
+from .elementor_agent import P, _find_html_widget, list_elementor_pages, read_body, write_body
+from .models import Approval, Finding, FixRecord, JobRun, RunLog, Site, SiteChange
 
 A_SETTINGS = f"{P}/wp-settings-get"
 ENTITY_CATS = ("no_entity_schema", "no_localbusiness_schema")
@@ -162,17 +162,25 @@ def run_schema_inject(site_id: int, run_id: int, conn: dict) -> None:
         db.add(change)
         db.commit()
         db.refresh(change)
-        db.add(Approval(
-            site_id=site_id, kind="schema_inject",
-            title=f"Add {schema_type} schema to homepage",
-            summary="Adds Organization/LocalBusiness structured data so Google and AI "
-                    "assistants understand your business. Invisible on the page; one-click revert.",
-            payload=json.dumps({"change_id": change.id, "page_id": pid, "jsonld": jstr}),
-            status="pending",
-        ))
-        _close_entity_findings(db, site_id)  # in-progress until approved
+        # AUTO-APPLY: entity JSON-LD is additive + invisible + revertible.
+        ok = write_body(client, pid, new_html)
+        change.status = "applied" if ok else "failed"
+        if ok:
+            for f in (db.query(Finding).filter(Finding.site_id == site_id,
+                                                Finding.category.in_(ENTITY_CATS),
+                                                Finding.status.in_(("open", "in-progress"))).all()):
+                f.status = "closed"
+                f.remark = f"Auto-fixed: {schema_type} JSON-LD injected (live)."
+            db.add(FixRecord(
+                site_id=site_id, doer="SEO Technical", field="schema",
+                action_taken=f"Auto-injected {schema_type} schema on the homepage (via _meridian_body)",
+                page_ref=str(pid), before_value="(no entity schema)", after_value=jstr[:5000],
+                method="auto-safe", lane="autonomous", applied=True,
+                verification_verdict="verified", status="done",
+            ))
         run.status = "completed"
-        run.summary = f"Proposed {schema_type} schema for the homepage — waiting for approval."
+        run.summary = (f"Auto-injected {schema_type} schema on the homepage — live."
+                       if ok else "Schema write didn't verify.")
         db.add(RunLog(site_id=site_id, message=run.summary))
         db.commit()
     except Exception as exc:

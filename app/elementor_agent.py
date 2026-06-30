@@ -18,9 +18,13 @@ from .abilities import AbilitiesClient, AbilitiesError, AbilitiesUnavailable, US
 from .brain import rewrite_page_html
 from .content_standard import scan, strip_em_dashes
 from .database import SessionLocal
-from .models import Approval, JobRun, RunLog, Site, SiteChange
+from .models import Approval, FixRecord, JobRun, RunLog, Site, SiteChange
 from .rules import rules_for
 from .wordpress import WordPressClient
+
+# Bound concurrent full-page rewrites: each is a large streaming Claude call, so a
+# whole-site sweep fired at once would hit API rate limits. Process a few at a time.
+_REWRITE_SEM = threading.Semaphore(3)
 
 P = "hostinger-ai-assistant"
 A_FIND = f"{P}/elementor-find-widgets"
@@ -340,8 +344,9 @@ def run_page_rewrite(site_id: int, run_id: int, conn: dict, page_id: int, page_t
         widget_id = ""
 
         try:
-            result = rewrite_page_html(site.name, site.url, page_title or str(page_id),
-                                       old_html, rules_for("shared", "website"))
+            with _REWRITE_SEM:  # cap concurrent rewrites to avoid API rate limits
+                result = rewrite_page_html(site.name, site.url, page_title or str(page_id),
+                                           old_html, rules_for("shared", "website"))
         except Exception as exc:
             run.status = "failed"
             run.summary = f"Rewrite generation failed: {exc.__class__.__name__}: {exc}"
@@ -360,25 +365,39 @@ def run_page_rewrite(site_id: int, run_id: int, conn: dict, page_id: int, page_t
             site_id=site_id, kind="page_rewrite",
             request=f"SEO rewrite: {page_title or ('page ' + str(page_id))}",
             css=new_html, old_css=old_html, status="proposed",
-            target_page_id=page_id, target_widget_id=widget_id,
+            target_page_id=page_id, target_widget_id="",
         )
         db.add(change)
         db.commit()
         db.refresh(change)
-
         summary = result.get("summary", "SEO rewrite of the page copy.")
+
         if flags:
-            summary += "  ⚠ Review before approving: " + " ".join(flags)
-        db.add(Approval(
-            site_id=site_id, kind="page_rewrite",
-            title=f"SEO rewrite: {page_title or ('page ' + str(page_id))}",
-            summary=summary,
-            payload=json.dumps({"change_id": change.id, "page_id": page_id,
-                                "widget_id": widget_id, "flags": flags}),
-            status="pending",
-        ))
-        run.status = "completed"
-        run.summary = f"Proposed an SEO rewrite of '{page_title or page_id}' — waiting for your approval."
+            # Safety checks flagged something (truncation / lost structure / banned
+            # words) — gate this one for human review rather than auto-applying.
+            db.add(Approval(
+                site_id=site_id, kind="page_rewrite",
+                title=f"SEO rewrite: {page_title or ('page ' + str(page_id))}",
+                summary=summary + "  ⚠ Review before approving: " + " ".join(flags),
+                payload=json.dumps({"change_id": change.id, "page_id": page_id, "flags": flags}),
+                status="pending",
+            ))
+            run.status = "completed"
+            run.summary = f"Proposed an SEO rewrite of '{page_title or page_id}' — needs review ({len(flags)} flag(s))."
+        else:
+            # Clean rewrite — auto-apply to the live body (revertible).
+            ok = write_body(client, page_id, new_html)
+            change.status = "applied" if ok else "failed"
+            db.add(FixRecord(
+                site_id=site_id, doer="Elementor On-page", field="page_html",
+                action_taken=f"Auto-applied SEO rewrite of '{page_title or page_id}' (via _meridian_body)",
+                page_ref=str(page_id), before_value=(old_html or "")[:5000], after_value=(new_html or "")[:5000],
+                method="auto-safe", lane="autonomous", applied=bool(ok),
+                verification_verdict="verified" if ok else "not_fixed", status="done", outcome_pending=True,
+            ))
+            run.status = "completed"
+            run.summary = (f"Auto-applied SEO rewrite of '{page_title or page_id}' — live ({summary})"
+                           if ok else f"Rewrite of '{page_title or page_id}' didn't verify.")
         db.add(RunLog(site_id=site_id, message=run.summary))
         db.commit()
     except Exception as exc:
