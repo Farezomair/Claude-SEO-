@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "content-diag-34"
+BUILD = "render-source-diag-35"
 
 
 @app.get("/version")
@@ -1071,19 +1071,27 @@ def write_test(site_id: int, request: Request, page_id: int = 12, db: Session = 
     widget_id, original = wh
     result.update(widget_id=widget_id, orig_len=len(original))
 
-    # Diagnostic: what does the page's post_content look like? (the front end may
-    # render that raw HTML rather than the Elementor widget we edit.)
+    # Diagnostic: what does the page's post_content look like, and what does the
+    # PUBLIC front end actually serve? (the page may render raw post_content, not
+    # the Elementor widget we edit.)
     import re as _re
+    import httpx as _httpx
+    def _imgstats(s):
+        t = _re.findall(r"<img\b[^>]*>", s or "", _re.I)
+        sized = sum(1 for x in t if _re.search(r"\swidth\s*=", x, _re.I) and _re.search(r"\sheight\s*=", x, _re.I))
+        return {"len": len(s or ""), "imgs": len(t), "sized": sized}
     pg = step("pages_get_content", lambda: client.read(A_PAGE_GET, {"id": page_id}))
     if pg:
         c = pg.get("content")
-        content = (c.get("rendered") or c.get("raw") or "") if isinstance(c, dict) else (c or "")
-        cimgs = _re.findall(r"<img\b[^>]*>", content, _re.I)
-        result["post_content_len"] = len(content)
-        result["post_content_imgs"] = len(cimgs)
-        result["post_content_imgs_sized"] = sum(
-            1 for t in cimgs if _re.search(r"\swidth\s*=", t, _re.I) and _re.search(r"\sheight\s*=", t, _re.I))
+        result["content_raw"] = _imgstats(c.get("raw")) if isinstance(c, dict) else None
+        result["content_rendered"] = _imgstats(c.get("rendered")) if isinstance(c, dict) else _imgstats(c)
         result["edit_mode"] = (pg.get("meta") or {}).get("_elementor_edit_mode")
+
+    def _public():
+        with _httpx.Client(timeout=20, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0"}) as hc:
+            r = hc.get(site.url)
+            return {**_imgstats(r.text), "ls_cache": r.headers.get("x-litespeed-cache", "")}
+    result["public_render"] = step("public_fetch", _public)
 
     token = f"<!-- ascend-write-test-{int(_time.time())} -->"
     marked = original + token
