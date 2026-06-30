@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "fair-scoring-41"
+BUILD = "revert-imgdims-42"
 
 
 @app.get("/version")
@@ -1213,6 +1213,39 @@ def body_test(site_id: int, request: Request, page_id: int = 12, db: Session = D
                          if (result.get("public") or {}).get("token_live")
                          else "wrote+verified in field, but NOT visible on public page (cache?)")
     return JSONResponse({"result": result, "steps": steps})
+
+
+@app.post("/sites/{site_id}/revert-img-dims")
+def revert_img_dims(site_id: int, request: Request, page_id: int = 12, db: Session = Depends(get_db)):
+    """Manual undo: strip width/height off a page's images in the live _meridian_body.
+    (Used to demonstrate that the audit independently re-detects the regression.)"""
+    import re as _re
+    from .elementor_agent import read_body, write_body
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return JSONResponse({"error": "site not found"}, status_code=404)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return JSONResponse({"error": "no WordPress connection"}, status_code=400)
+    client = AbilitiesClient(conn["url"], conn["username"], conn["app_password"])
+    body = read_body(client, page_id)
+    if body is None:
+        return JSONResponse({"error": "could not read body"}, status_code=502)
+    removed = {"n": 0}
+
+    def _strip(m):
+        t = m.group(0)
+        if _re.search(r'\swidth="\d+"', t, _re.I) and _re.search(r'\sheight="\d+"', t, _re.I):
+            removed["n"] += 1
+        return _re.sub(r'\s+height="\d+"', '', _re.sub(r'\s+width="\d+"', '', t, flags=_re.I), flags=_re.I)
+
+    new_body = _re.sub(r'<img\b[^>]*>', _strip, body, flags=_re.I)
+    ok = write_body(client, page_id, new_body)
+    db.add(RunLog(site_id=site_id, message=f"Manual revert: stripped dimensions from {removed['n']} image(s) on page {page_id} (live)."))
+    db.commit()
+    return JSONResponse({"page_id": page_id, "imgs_stripped": removed["n"], "verified": ok})
 
 
 # --------------------------------------------------------------------------
