@@ -141,10 +141,29 @@ _PUBLISH_INSTR = (
     "terms — never invent specific facts, addresses, or numbers.")
 
 
+def _ensure_footer_link_doer(db, ctx):
+    """Fire the internal-linking doer once per run — it links every orphaned
+    required page (published but reachable from no internal link) into the footer,
+    verifies it live, and closes the finding. Orphaned pages are invisible to the
+    audit, to Google, and to visitors, so publishing alone never clears them."""
+    if ctx.get("link_done"):
+        return
+    from .link_agent import start_footer_links_async
+    lj = JobRun(site_id=ctx["site"].id, kind="linking", status="running",
+                summary="Linking orphaned pages into the footer…")
+    db.add(lj)
+    db.commit()
+    db.refresh(lj)
+    start_footer_links_async(ctx["site"].id, lj.id, ctx["conn"])
+    ctx["link_done"] = True
+
+
 def _propose_required_page(db, ctx, f):
-    """Auto-create AND publish the missing required page at its conventional slug
-    (privacy/terms/about/contact/accessibility). Publishing resolves both the
-    required-page finding and any broken link that pointed at that 404'd URL."""
+    """Make the required page exist AND be reachable. If it isn't published yet,
+    create + publish it at its conventional slug; if it exists but is orphaned
+    (the audit flags it because no internal link reaches it), hand off to the
+    internal-linking doer to add a footer link. Either way the finding only closes
+    once the page is live AND linked (the linking doer verifies + closes it)."""
     page_type = _page_type(f.issue)
     if "existing_slugs" not in ctx:
         try:
@@ -152,26 +171,30 @@ def _propose_required_page(db, ctx, f):
         except Exception:
             ctx["existing_slugs"] = set()
     published = ctx.setdefault("pages_published", set())
-    if page_type in published or page_type in ctx["existing_slugs"]:
-        return ("closed", f"A {page_type} page already exists at /{page_type}.", False)
-    try:
-        page = generate_page(ctx["site"].name, ctx["site"].url, page_type, instructions=_PUBLISH_INSTR)
-    except Exception as exc:
-        return ("escalated", f"Page generation failed ({exc.__class__.__name__}).", False)
-    if not page.get("title") or not page.get("body_html"):
-        return ("open", "Page came back empty; will retry next run.", False)
-    try:
-        result = ctx["wp"].create_page(page["title"], strip_em_dashes(page["body_html"]),
-                                       status="publish", slug=page_type)
-    except WordPressError as exc:
-        return ("escalated", f"Publishing the {page_type} page failed: {exc}", False)
-    published.add(page_type)
-    ctx["existing_slugs"].add(result.get("slug") or page_type)
-    _fixrecord(db, ctx, f, "Website Agent", f"Created + published the {page_type} page",
-               after=(result.get("link", "") or f"/{page_type}")[:500], method="auto-safe")
-    return ("closed",
-            f"Auto-created + published the {page_type} page (live at /{result.get('slug', page_type)}) — "
-            "clears the missing-page finding and the broken link to it.", True)
+    created_note = ""
+    if page_type not in published and page_type not in ctx["existing_slugs"]:
+        try:
+            page = generate_page(ctx["site"].name, ctx["site"].url, page_type, instructions=_PUBLISH_INSTR)
+        except Exception as exc:
+            return ("escalated", f"Page generation failed ({exc.__class__.__name__}).", False)
+        if not page.get("title") or not page.get("body_html"):
+            return ("open", "Page came back empty; will retry next run.", False)
+        try:
+            result = ctx["wp"].create_page(page["title"], strip_em_dashes(page["body_html"]),
+                                           status="publish", slug=page_type)
+        except WordPressError as exc:
+            return ("escalated", f"Publishing the {page_type} page failed: {exc}", False)
+        published.add(page_type)
+        ctx["existing_slugs"].add(result.get("slug") or page_type)
+        _fixrecord(db, ctx, f, "Website Agent", f"Created + published the {page_type} page",
+                   after=(result.get("link", "") or f"/{page_type}")[:500], method="auto-safe")
+        created_note = f"Published the {page_type} page. "
+    # The page exists now (just created, or already there but orphaned). Link it
+    # into the footer so the crawler/Google/visitors can actually reach it.
+    _ensure_footer_link_doer(db, ctx)
+    return ("in-progress",
+            created_note + f"Linking the {page_type} page into the footer so the audit, Google, and "
+            "visitors can find it — auto, verified live, then this finding closes.", False)
 
 
 def _propose_dedupe(db, ctx, f):
