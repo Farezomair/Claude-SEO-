@@ -15,7 +15,8 @@ from .brain import analyze_page_content
 
 REQUEST_TIMEOUT = 12.0
 USER_AGENT = "SEO-Agent-Auditor/1.0 (+read-only audit)"
-MAX_PAGES = 2   # homepage + one key page (keeps the score stable run-to-run)
+MAX_PAGES = 15  # homepage + service/location/content pages — full-site content audit
+                # (so the dispatcher can drive rewrites across every weak page)
 UTILITY = ("contact", "privacy", "terms", "cart", "checkout", "login", "account",
            "thank", "search", "404", "wp-")
 
