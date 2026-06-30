@@ -48,6 +48,7 @@
       </div>
       {% endfor %}
     </div>
+    <div id="cc-live" style="display:none;"></div>
     <div class="cc-detail" id="cc-detail" style="display:none;"></div>
     <div class="cc-stat">
       <div><div class="n" id="cc-findings">{{ pipeline.findings if pipeline.findings is not none else '—' }}</div><div class="l">Findings</div></div>
@@ -275,6 +276,20 @@
   </details>
 </div>
 
+<style>
+  #cc-live { margin-top:18px; }
+  .lv-head { font-size:11.5px; color:var(--muted); margin:0 0 11px; text-transform:uppercase; letter-spacing:.05em; }
+  .lv-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(235px, 1fr)); gap:10px 24px; }
+  .lv-row { display:flex; align-items:center; gap:9px; font-size:12.5px; }
+  .lv-name { min-width:108px; color:var(--text); white-space:nowrap; }
+  .lv-name .lv-dot { display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:7px; vertical-align:middle; }
+  .lv-track { position:relative; flex:1; height:7px; background:var(--panel-2); border-radius:999px; overflow:hidden; }
+  .lv-track i { position:absolute; left:0; top:0; height:100%; background:var(--accent-grad); border-radius:999px; transition:width .5s ease; }
+  .lv-track i.anim { width:42% !important; animation:lvslide 1.15s ease-in-out infinite; }
+  @keyframes lvslide { 0%{left:-42%} 100%{left:100%} }
+  .lv-tick { width:14px; font-weight:700; text-align:center; flex:none; }
+  .lv-row.lv-pending .lv-name { color:var(--muted); }
+</style>
 <script>
   (function () {
     var STATE_LABEL = {pending:'Waiting', active:'Working', done:'Done', failed:'Failed'};
@@ -283,6 +298,37 @@
     var timer = null, prevRunning = null, sel = null, last = {};
 
     function esc(s){ var d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML; }
+
+    function lvBar(name, state, lane) {
+      var dot = lane ? '<span class="lv-dot" style="background:' + (lane === 'auto' ? '#34d399' : '#7dd3fc') + '"></span>' : '';
+      var w = state === 'done' ? '100%' : (state === 'active' ? '42%' : '0%');
+      var anim = state === 'active' ? 'anim' : '';
+      var tick = state === 'done' ? '✓' : (state === 'failed' ? '!' : '');
+      var tcol = state === 'failed' ? '#fda4af' : '#34d399';
+      return '<div class="lv-row ' + (state === 'pending' ? 'lv-pending' : '') + '">'
+        + '<span class="lv-name">' + dot + esc(name) + '</span>'
+        + '<span class="lv-track"><i class="' + anim + '" style="width:' + w + '"></i></span>'
+        + '<span class="lv-tick" style="color:' + tcol + '">' + tick + '</span></div>';
+    }
+
+    function renderLive(d) {
+      var box = document.getElementById('cc-live');
+      if (!box) return;
+      if (!d.running) { box.style.display = 'none'; return; }
+      if (d.phase === 'audit') {
+        var caps = d.audit_caps || [];
+        box.innerHTML = '<p class="lv-head">Auditing — scanning ' + caps.length + ' capabilities</p>'
+          + '<div class="lv-grid">' + caps.map(function (c) { return lvBar(c.label, c.state, null); }).join('') + '</div>';
+        box.style.display = 'block';
+      } else if (['route', 'fix', 'report', 'done'].indexOf(d.phase) >= 0 && (d.doers || []).length) {
+        var act = d.doers.filter(function (x) { return x.state === 'active'; }).length;
+        box.innerHTML = '<p class="lv-head">Doers' + (act ? ' — ' + act + ' working' : '') + '</p>'
+          + '<div class="lv-grid">' + d.doers.map(function (x) { return lvBar(x.agent, x.state, x.lane); }).join('') + '</div>';
+        box.style.display = 'block';
+      } else {
+        box.style.display = 'none';
+      }
+    }
 
     function renderDetail() {
       var box = document.getElementById('cc-detail');
@@ -327,6 +373,7 @@
       var x = document.getElementById('cc-fixes'); if (x) x.textContent = (d.fixes == null) ? '—' : d.fixes;
       var sm = document.getElementById('cc-summary'); if (sm && d.summary) sm.textContent = d.summary;
       var run = document.getElementById('cc-run'); if (run) { run.disabled = d.running; run.textContent = d.running ? 'Crew working…' : '▶ Run audit & fix'; }
+      renderLive(d);
       if (sel) renderDetail();
       // When a run finishes, reload once to show the fresh score / report / approvals.
       if (prevRunning === true && !d.running) { location.reload(); return; }

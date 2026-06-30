@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "powers-viewer-48"
+BUILD = "pipeline-agents-49"
 
 
 @app.get("/version")
@@ -298,6 +298,78 @@ def _pipeline_state(run, report_id=None) -> dict:
     }
 
 
+_DOER_JOB_KINDS = ["elementor", "image", "schema", "technical", "linking", "pagedraft"]
+_STATE_PRIORITY = {"active": 3, "failed": 2, "done": 1, "pending": 0}
+
+
+def _merge_state(a, b):
+    if a is None or _STATE_PRIORITY.get(b, 0) > _STATE_PRIORITY.get(a, 0):
+        return b
+    return a
+
+
+def _doer_states(db, site_id, run):
+    """Live state per named doer-agent for the current weekly run: pending /
+    active / done / failed. Spawned doers (Elementor/Image/Schema/Technical/
+    Linking) read their background JobRuns; inline doers (Meta/Dedupe/Ranking/
+    Website) read the FixRecords/Approvals they produced this run. Returns
+    (doers, any_active) — any_active keeps the poller alive while background
+    doers finish after the weekly phases complete."""
+    from .capabilities import DOERS
+    from .dispatcher import META_CATS
+    if not run:
+        return [{"agent": d["agent"], "lane": d["lane"], "state": "pending"} for d in DOERS], False
+    since = run.created_at
+    kind_state, any_active = {}, False
+    for j in (db.query(JobRun)
+              .filter(JobRun.site_id == site_id, JobRun.created_at >= since,
+                      JobRun.kind.in_(_DOER_JOB_KINDS)).all()):
+        st = ("active" if j.status == "running" else "done" if j.status == "completed"
+              else "failed" if j.status == "failed" else "pending")
+        if st == "active":
+            any_active = True
+        kind_state[j.kind] = _merge_state(kind_state.get(j.kind), st)
+    fr = db.query(FixRecord).filter(FixRecord.site_id == site_id, FixRecord.created_at >= since).all()
+    ap = db.query(Approval).filter(Approval.site_id == site_id, Approval.created_at >= since).all()
+    inline = {
+        "meta": any(f.field in META_CATS for f in fr),
+        "required_pages": any(f.field == "required_page_missing" or (f.doer or "") == "Website Agent" for f in fr),
+        "linking": any((f.doer or "") == "Internal Linking" for f in fr),
+        "dedupe": any(a.kind == "meta_rewrite" and "unique" in (a.title or "").lower() for a in ap),
+        "ranking": any(a.kind == "meta_rewrite" and ("ranking" in (a.title or "").lower()
+                       or "boost" in (a.title or "").lower()) for a in ap),
+        "schema": any(a.kind == "schema_inject" for a in ap),
+    }
+    doers = []
+    for d in DOERS:
+        state = "pending"
+        for k in d["job_kinds"]:
+            if k in kind_state:
+                state = _merge_state(state, kind_state[k])
+        if inline.get(d["key"]):
+            state = _merge_state(state, "done")
+        doers.append({"agent": d["agent"], "lane": d["lane"], "state": state})
+    return doers, any_active
+
+
+def _audit_caps(run):
+    """Audit-phase capability bars: 'active' (scanning) while auditing, 'done'
+    once the audit phase is past, 'pending' before a run starts."""
+    from .capabilities import AUDIT_CATEGORIES
+    phase = run.phase if run else None
+    ai = _PHASE_ORDER.get(phase, -1)
+    caps = []
+    for c in AUDIT_CATEGORIES:
+        if not run or ai < 0:
+            st = "pending"
+        elif phase == "audit":
+            st = "failed" if run.status == "failed" else "active"
+        else:
+            st = "done"
+        caps.append({"label": c["label"], "state": st})
+    return caps
+
+
 @app.get("/sites/{site_id}/pipeline-status")
 def pipeline_status(site_id: int, request: Request, db: Session = Depends(get_db)):
     """Live pipeline state for the Command Center poller (JSON)."""
@@ -312,6 +384,13 @@ def pipeline_status(site_id: int, request: Request, db: Session = Depends(get_db
         .order_by(Report.created_at.desc()).first()
     )
     state = _pipeline_state(run, report.id if report else None)
+    # Named doer-agents + audit capabilities for the animated pipeline.
+    doers, doers_active = _doer_states(db, site_id, run)
+    state["doers"] = doers
+    state["audit_caps"] = _audit_caps(run)
+    # Keep polling while background doers are still working, even if the weekly
+    # phases have moved on (the dispatcher spawns them async).
+    state["running"] = state["running"] or doers_active
     # Live fix log: findings the dispatcher has worked (has a remark), newest first.
     log = (
         db.query(Finding)
