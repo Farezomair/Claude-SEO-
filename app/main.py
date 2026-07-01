@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "alt-text-doer-50"
+BUILD = "redirects-doer-51"
 
 
 @app.get("/version")
@@ -298,7 +298,7 @@ def _pipeline_state(run, report_id=None) -> dict:
     }
 
 
-_DOER_JOB_KINDS = ["elementor", "image", "alttext", "schema", "technical", "linking", "pagedraft"]
+_DOER_JOB_KINDS = ["elementor", "image", "alttext", "schema", "technical", "linking", "redirects", "pagedraft"]
 _STATE_PRIORITY = {"active": 3, "failed": 2, "done": 1, "pending": 0}
 
 
@@ -1081,6 +1081,34 @@ def run_alt(site_id: int, request: Request, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(run)
         start_alt_text_async(site_id, run.id, conn, pid, p.get("title", ""))
+    return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
+
+
+@app.post("/sites/{site_id}/run-redirects")
+def run_redirects_now(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """Redirects doer only: 301 broken internal URLs to the best live page,
+    verified live. Needs SEO Agent Bridge v7+ (the /redirects endpoint)."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return RedirectResponse(f"/sites/{site_id}?tab=settings&notice=test_none", status_code=303)
+    already = (
+        db.query(JobRun)
+        .filter(JobRun.site_id == site_id, JobRun.kind == "redirects", JobRun.status == "running")
+        .first()
+    )
+    if not already:
+        run = JobRun(site_id=site_id, kind="redirects", status="running",
+                     summary="Redirecting dead URLs…")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        from .redirect_agent import start_redirects_async
+        start_redirects_async(site_id, run.id, conn)
     return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
 
 

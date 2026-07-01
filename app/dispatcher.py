@@ -334,6 +334,27 @@ def _handle_broken(db, ctx, f):
     return ("no-capability", NO_CAP.get(f.category, "Broken link — needs a redirects doer (not built yet)."), False)
 
 
+def _propose_redirects(db, ctx, f):
+    """Broken internal link/page -> 301 redirect to the best live page (fires the
+    redirects doer once per run). External bot-blockers aren't real defects."""
+    issue = (f.issue or "").lower()
+    if "blocks automated checks" in issue or "403" in issue:
+        return ("no-capability",
+                "External link that blocks bots; it works for real visitors — no action needed.", False)
+    if not ctx.get("redirects_done"):
+        from .redirect_agent import start_redirects_async
+        rj = JobRun(site_id=ctx["site"].id, kind="redirects", status="running",
+                    summary="Redirecting dead URLs…")
+        db.add(rj)
+        db.commit()
+        db.refresh(rj)
+        start_redirects_async(ctx["site"].id, rj.id, ctx["conn"])
+        ctx["redirects_done"] = True
+    return ("in-progress",
+            "Redirecting broken internal URLs to the best live page (301, verified live) — "
+            "external links left for your review.", False)
+
+
 def _propose_img_dims(db, ctx, f):
     """Measure images on the page and propose width/height to stop layout shift."""
     item = (ctx.get("items") or {}).get(_norm(f.evidence_url))
@@ -388,8 +409,8 @@ HANDLERS = {
     "no_localbusiness_schema": _propose_schema,
     "security_headers": _propose_technical,
     "no_llms_txt": _propose_technical,
-    "broken_link": _handle_broken,
-    "broken_page": _handle_broken,
+    "broken_link": _propose_redirects,
+    "broken_page": _propose_redirects,
 }
 
 

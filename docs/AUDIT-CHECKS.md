@@ -20,9 +20,9 @@ Lane = how the matching doer acts: 🟢 auto · 🔵 approval · 🟡 owner-only
 |---|---|---|---|---|
 | `required_page_missing` | privacy/terms/about/contact/accessibility unreachable | med/low | crawler | 🟢 Required-pages + Internal-linking |
 | `security_headers` | HSTS/CSP/X-Frame/etc. missing | low | crawler | 🟢 Technical |
-| `broken_page` | page returns 4xx/5xx | high | crawler | ⚪ (redirects doer) |
-| `broken_link` | dead internal/external link | high/low | crawler | ⚪ (redirects doer) |
-| `redirect_issue` | redirect chain/loop | low | crawler | ⚪ (redirects doer) |
+| `broken_page` | page returns 4xx/5xx | high | crawler | 🟢 Redirects (internal) |
+| `broken_link` | dead internal/external link | high/low | crawler | 🟢 Redirects (internal; external → review) |
+| `redirect_issue` | redirect chain/loop | low | crawler | ⚪ (chain-flattening not built) |
 | `orphan_page` | page reachable from no internal link | low | crawler | ⚪ (extend Internal-linking) |
 | `no_https` | HTTPS not enforced | high | crawler | ⚪ host-level |
 | `mixed_content` | http assets on https page | med | crawler | ⚪ host-level |

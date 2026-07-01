@@ -3,14 +3,14 @@
 Single source of truth for how many doers Ascend has and what each one fixes.
 Keep this updated whenever a doer is added/changed.
 
-**Doer count (audit-fixing): 10**
-_Last updated: 2026-07-01 — after building the Alt-text doer._
+**Doer count (audit-fixing): 11**
+_Last updated: 2026-07-01 — after building the Redirects doer (needs Bridge v7)._
 
 A "doer" here = a capability that executes or proposes a fix for an audit
 finding. Lanes: 🟢 auto (applied + verified live) · 🔵 needs owner approval ·
 🟡 owner-only fact (not auto-fixable by design).
 
-## Built (10)
+## Built (11)
 
 | # | Doer | Module / handler | Fixes (audit categories) | Lane |
 |---|------|------------------|--------------------------|------|
@@ -18,6 +18,7 @@ finding. Lanes: 🟢 auto (applied + verified live) · 🔵 needs owner approval
 | 2 | Elementor rewrite | `elementor_agent.run_page_rewrite` | `thin_content`, `eeat_weak`, `content_shallow`, `content_stale`, `geo_unstructured`, `heading_hierarchy`, `missing_h1`, `multiple_h1`, `nap_missing` | 🟢 if safe, else 🔵 |
 | 3 | Image dimensions | `image_agent.run_image_dims` | `image_no_dimensions` | 🟢 |
 | 10 | Alt-text | `alt_agent.run_alt_text` → `brain.generate_alt_texts` | `images_missing_alt` | 🟢 |
+| 11 | Redirects | `redirect_agent.run_redirects` → `brain.pick_redirect_targets` + Bridge `/redirects` (v7) | `broken_link` (internal), `broken_page` | 🟢 |
 | 4 | Required-pages | `dispatcher._propose_required_page` → `wordpress.create_page` | `required_page_missing` (create + publish) | 🟢 |
 | 5 | Internal-linking | `link_agent.run_footer_links` | `required_page_missing` (orphaned → footer link) | 🟢 |
 | 6 | Technical | `technical_agent.run_technical_fixes` (Bridge) | `security_headers`, `no_llms_txt` | 🟢 |
@@ -33,7 +34,6 @@ broken-link classifier (`_handle_broken`), on-demand Website CSS doer
 
 | Planned doer | Will fix |
 |--------------|----------|
-| Redirects | `broken_link`, `broken_page`, `redirect_issue` |
 | Head/meta | `missing_canonical`, `og_incomplete`, `missing_favicon` |
 | Robots | `ai_crawler_blocked` |
 | Schema-cleanup | `schema_invalid`, `schema_placeholder`, `schema_deprecated` |

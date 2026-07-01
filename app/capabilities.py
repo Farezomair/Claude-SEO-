@@ -118,6 +118,10 @@ DOERS = [
      "summary": "footer links",
      "desc": "Links orphaned-but-published pages into the footer so the audit, Google, and visitors can reach them. Verified live.",
      "job_kinds": ["linking"]},
+    {"key": "redirects", "agent": "Redirects Agent", "lane": "auto", "status": "active",
+     "summary": "broken links/pages → 301",
+     "desc": "301-redirects dead internal URLs to the most relevant live page (chosen by AI), so broken links and pages resolve. Verified live; external links left for review.",
+     "job_kinds": ["redirects"]},
     {"key": "technical", "agent": "Technical Agent", "lane": "auto", "status": "active",
      "summary": "security headers + llms.txt",
      "desc": "Sets security response headers and serves /llms.txt through the Bridge plugin, then re-checks the live site.",
@@ -138,8 +142,6 @@ DOERS = [
 
 # Roadmap — shown as "planned" cards in the viewer (see memory ascend-doer-roadmap).
 PLANNED_DOERS = [
-    {"agent": "Redirects Agent", "summary": "broken links/pages, redirects",
-     "desc": "Fixes or redirects broken links and pages and cleans up redirect chains."},
     {"agent": "Head/meta Agent", "summary": "canonical, Open Graph, favicon",
      "desc": "Adds canonical tags, Open Graph tags, and a favicon."},
     {"agent": "Robots Agent", "summary": "AI crawler access",

@@ -159,6 +159,51 @@ Respond with ONLY a JSON object mapping the image index (as a string) to its alt
     return out
 
 
+def pick_redirect_targets(site_name: str, live_pages: list, dead_paths: list) -> dict:
+    """Choose the best live destination to 301-redirect each dead URL to.
+
+    `live_pages` = [{"path", "title"}]; `dead_paths` = ["/x", ...]. Returns
+    {dead_path: target_path} — a real live path chosen for topic relevance, or
+    "/" (homepage) when nothing fits. Only ever returns a listed live path or "/"."""
+    if not dead_paths:
+        return {}
+    live = "\n".join(f"- {p.get('path')}  ({(p.get('title') or '')[:60]})" for p in live_pages[:60])
+    deads = "\n".join(f"{i}. {d}" for i, d in enumerate(dead_paths))
+    prompt = f"""A website has dead/broken URLs. For each dead URL choose the single BEST live page to 301-redirect it to, based on topic similarity (e.g. a dead /grill-repairs should go to a live grill-repair page).
+
+Business: {site_name or "(unknown)"}
+
+Live pages (path — title):
+{live}
+
+Dead URLs:
+{deads}
+
+Rules:
+- Pick the most topically relevant live path for each dead URL. If nothing is a good match, use "/".
+- Only choose from the live paths listed above, or "/".
+
+Respond with ONLY a JSON object mapping the dead URL index (as a string) to the chosen live path, e.g. {{"0": "/patio-construction", "1": "/"}}. Nothing else."""
+    response = _get_client().messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=1024,
+        system="You map dead URLs to the best live page. You respond only with a single JSON object and nothing else.",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    text = next((b.text for b in response.content if b.type == "text"), "")
+    data = _extract_json(text)
+    live_set = {p.get("path") for p in live_pages}
+    out = {}
+    for i, d in enumerate(dead_paths):
+        t = str(data.get(str(i), "")).strip()
+        if not t.startswith("/"):
+            t = "/"
+        if t != "/" and t not in live_set:
+            t = "/"
+        out[d] = t
+    return out
+
+
 def generate_article(site_name: str, site_url: str, topic: str = "", rules: str = "",
                      instructions: str = "") -> dict:
     """Draft a blog post. Returns {"title", "meta_description", "body_html"}."""
