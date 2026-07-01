@@ -126,6 +126,14 @@ DOERS = [
      "summary": "security headers + llms.txt",
      "desc": "Sets security response headers and serves /llms.txt through the Bridge plugin, then re-checks the live site.",
      "job_kinds": ["technical"]},
+    {"key": "headmeta", "agent": "Head/meta Agent", "lane": "auto", "status": "active",
+     "summary": "canonical / Open Graph / viewport / favicon",
+     "desc": "Injects the <head> tags a page is missing — self-canonical, Open Graph, mobile viewport, and a favicon — via the Bridge, verified live.",
+     "job_kinds": ["headmeta"]},
+    {"key": "schemaclean", "agent": "Schema-cleanup Agent", "lane": "auto", "status": "active",
+     "summary": "remove broken / placeholder / deprecated schema",
+     "desc": "Removes invalid, placeholder, or deprecated (FAQPage/HowTo) JSON-LD from the live page — bad structured data is worse than none. Verified live.",
+     "job_kinds": ["schemaclean"]},
     {"key": "schema", "agent": "Schema Agent", "lane": "approval", "status": "active",
      "summary": "Organization / LocalBusiness JSON-LD",
      "desc": "Generates Organization and LocalBusiness structured data for your review before it goes live.",
@@ -142,12 +150,8 @@ DOERS = [
 
 # Roadmap — shown as "planned" cards in the viewer (see memory ascend-doer-roadmap).
 PLANNED_DOERS = [
-    {"agent": "Head/meta Agent", "summary": "canonical, Open Graph, favicon",
-     "desc": "Adds canonical tags, Open Graph tags, and a favicon."},
     {"agent": "Robots Agent", "summary": "AI crawler access",
      "desc": "Opens robots.txt so AI assistants (GPTBot, etc.) can crawl the site."},
-    {"agent": "Schema-cleanup Agent", "summary": "invalid / placeholder / deprecated schema",
-     "desc": "Repairs malformed, placeholder, or deprecated structured data."},
     {"agent": "WebP Agent", "summary": "modern image formats",
      "desc": "Converts images to WebP/AVIF for faster loads."},
     {"agent": "Performance Agent", "summary": "Core Web Vitals",

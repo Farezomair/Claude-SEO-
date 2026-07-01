@@ -387,6 +387,39 @@ def _propose_alt(db, ctx, f):
     return ("in-progress", "Writing descriptive alt text for the images and auto-applying to the live page (verified).", False)
 
 
+def _propose_headmeta(db, ctx, f):
+    """Canonical / Open Graph / viewport / favicon via the Bridge head-injection
+    (fires once per run; site-level toggles, verified live)."""
+    if ctx.get("headmeta_done"):
+        return ("in-progress", "Covered by the head/meta fix running this run.", False)
+    from .headmeta_agent import start_headmeta_async
+    hj = JobRun(site_id=ctx["site"].id, kind="headmeta", status="running", summary="Adding head tags…")
+    db.add(hj)
+    db.commit()
+    db.refresh(hj)
+    start_headmeta_async(ctx["site"].id, hj.id, ctx["conn"])
+    ctx["headmeta_done"] = True
+    return ("in-progress",
+            "Adding the missing head tags (canonical / Open Graph / viewport / favicon) — auto, verified live.", False)
+
+
+def _propose_schema_cleanup(db, ctx, f):
+    """Remove broken/placeholder/deprecated JSON-LD from the page (auto, verified)."""
+    item = (ctx.get("items") or {}).get(_norm(f.evidence_url))
+    if not item:
+        return ("no-capability", "Couldn't match this page to clean its schema.", False)
+    pid, title = item["id"], item.get("title", "")
+    from .schema_cleanup_agent import start_schema_cleanup_async
+    sub = JobRun(site_id=ctx["site"].id, kind="schemaclean", status="running",
+                 summary=f"Cleaning schema on {title or pid}…")
+    db.add(sub)
+    db.commit()
+    db.refresh(sub)
+    start_schema_cleanup_async(ctx["site"].id, sub.id, ctx["conn"], pid, title)  # background, auto-applies
+    return ("in-progress",
+            "Removing broken/placeholder/deprecated structured data from the live page (verified).", False)
+
+
 def _human_task(db, ctx, f):
     """Owner-only fact (real phone/license/prices). Can't be AI-fixed — surface it
     in Approvals under 'Needs your attention'. Recurs each audit until fixed."""
@@ -401,6 +434,13 @@ HANDLERS = {
     "needs_real_data": _human_task,
     "image_no_dimensions": _propose_img_dims,
     "images_missing_alt": _propose_alt,
+    "missing_canonical": _propose_headmeta,
+    "og_incomplete": _propose_headmeta,
+    "missing_viewport": _propose_headmeta,
+    "missing_favicon": _propose_headmeta,
+    "schema_invalid": _propose_schema_cleanup,
+    "schema_placeholder": _propose_schema_cleanup,
+    "schema_deprecated": _propose_schema_cleanup,
     "required_page_missing": _propose_required_page,
     "duplicate_title": _propose_dedupe,
     "striking_distance": _propose_ranking,
@@ -458,7 +498,9 @@ def dispatch_fixes(site_id: int, progress_run_id: int | None = None) -> dict:
                "wp": WordPressClient(conn["url"], conn["username"], conn["app_password"]),
                "items": None}
         # Build the URL->page map once if any finding needs a page lookup.
-        lookup_cats = META_CATS | REWRITE_CATS | {"duplicate_title", "striking_distance", "low_ctr", "image_no_dimensions", "images_missing_alt"}
+        lookup_cats = META_CATS | REWRITE_CATS | {"duplicate_title", "striking_distance", "low_ctr",
+                                                  "image_no_dimensions", "images_missing_alt",
+                                                  "schema_invalid", "schema_placeholder", "schema_deprecated"}
         if any(f.category in lookup_cats for f in findings):
             try:
                 _all = [it for it in ctx["wp"].list_content(limit=100) if it.get("link")]

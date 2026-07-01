@@ -26,9 +26,9 @@ Lane = how the matching doer acts: 🟢 auto · 🔵 approval · 🟡 owner-only
 | `orphan_page` | page reachable from no internal link | low | crawler | ⚪ (extend Internal-linking) |
 | `no_https` | HTTPS not enforced | high | crawler | ⚪ host-level |
 | `mixed_content` | http assets on https page | med | crawler | ⚪ host-level |
-| `missing_canonical` | no canonical tag | low | crawler | ⚪ (head/meta doer) |
+| `missing_canonical` | no canonical tag | low | crawler | 🟢 Head/meta |
 | `indexation` | noindex / no robots.txt / no sitemap | med/low | crawler | ⚪ review |
-| `missing_viewport` | no mobile viewport meta | med | crawler | ⚪ theme-level |
+| `missing_viewport` | no mobile viewport meta | med | crawler | 🟢 Head/meta |
 | `structure` | no header / footer region | med | crawler | ⚪ often false positive |
 
 ## On-page — 12 checks
@@ -43,8 +43,8 @@ Lane = how the matching doer acts: 🟢 auto · 🔵 approval · 🟡 owner-only
 | `duplicate_title` | two pages share a title | med | crawler | 🔵 Dedupe-title |
 | `striking_distance` | GSC: page ranking just off page 1 | — | gsc | 🔵 Ranking |
 | `low_ctr` | GSC: impressions but low CTR | — | gsc | 🔵 Ranking |
-| `og_incomplete` | missing Open Graph tags | low | crawler | ⚪ (head/meta doer) |
-| `missing_favicon` | no favicon | low | crawler | ⚪ (head/meta doer) |
+| `og_incomplete` | missing Open Graph tags | low | crawler | 🟢 Head/meta |
+| `missing_favicon` | no favicon | low | crawler | 🟢 Head/meta (best-effort — reuses a logo image) |
 | `images_missing_alt` | images without alt text | low | crawler | 🟢 Alt-text |
 
 ## Content & E-E-A-T — 5 checks
@@ -60,9 +60,9 @@ Lane = how the matching doer acts: 🟢 auto · 🔵 approval · 🟡 owner-only
 | Check (category) | Detects | Sev | Source | Handled by |
 |---|---|---|---|---|
 | `missing_schema` | no structured data on page | low | crawler | 🔵 Schema |
-| `schema_invalid` | malformed JSON-LD | med | crawler | ⚪ (schema-cleanup doer) |
-| `schema_placeholder` | placeholder text in schema | med | crawler | ⚪ (schema-cleanup doer) |
-| `schema_deprecated` | deprecated FAQPage/HowTo | low | crawler | ⚪ (schema-cleanup doer) |
+| `schema_invalid` | malformed JSON-LD | med | crawler | 🟢 Schema-cleanup |
+| `schema_placeholder` | placeholder text in schema | med | crawler | 🟢 Schema-cleanup |
+| `schema_deprecated` | deprecated FAQPage/HowTo | low | crawler | 🟢 Schema-cleanup |
 
 ## AI / GEO — 4 checks
 | Check (category) | Detects | Sev | Source | Handled by |
