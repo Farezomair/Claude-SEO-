@@ -1,0 +1,46 @@
+# Ascend Doer Registry
+
+Single source of truth for how many doers Ascend has and what each one fixes.
+Keep this updated whenever a doer is added/changed.
+
+**Doer count (audit-fixing): 10**
+_Last updated: 2026-07-01 — after building the Alt-text doer._
+
+A "doer" here = a capability that executes or proposes a fix for an audit
+finding. Lanes: 🟢 auto (applied + verified live) · 🔵 needs owner approval ·
+🟡 owner-only fact (not auto-fixable by design).
+
+## Built (10)
+
+| # | Doer | Module / handler | Fixes (audit categories) | Lane |
+|---|------|------------------|--------------------------|------|
+| 1 | Meta | `dispatcher._fix_meta` → `wordpress.py` | `meta_title`, `meta_description`, `missing_title`, `meta_description_missing`, `title_length` | 🟢 |
+| 2 | Elementor rewrite | `elementor_agent.run_page_rewrite` | `thin_content`, `eeat_weak`, `content_shallow`, `content_stale`, `geo_unstructured`, `heading_hierarchy`, `missing_h1`, `multiple_h1`, `nap_missing` | 🟢 if safe, else 🔵 |
+| 3 | Image dimensions | `image_agent.run_image_dims` | `image_no_dimensions` | 🟢 |
+| 10 | Alt-text | `alt_agent.run_alt_text` → `brain.generate_alt_texts` | `images_missing_alt` | 🟢 |
+| 4 | Required-pages | `dispatcher._propose_required_page` → `wordpress.create_page` | `required_page_missing` (create + publish) | 🟢 |
+| 5 | Internal-linking | `link_agent.run_footer_links` | `required_page_missing` (orphaned → footer link) | 🟢 |
+| 6 | Technical | `technical_agent.run_technical_fixes` (Bridge) | `security_headers`, `no_llms_txt` | 🟢 |
+| 7 | Schema | `schema_agent.run_schema_inject` | `no_entity_schema`, `no_localbusiness_schema`, `missing_schema` | 🔵 |
+| 8 | Dedupe-title | `dispatcher._propose_dedupe` | `duplicate_title` | 🔵 |
+| 9 | Ranking | `dispatcher._propose_ranking` → `brain.improve_meta` | `striking_distance`, `low_ctr` | 🔵 |
+
+Not counted as fix-doers: owner-task router (`_human_task` for `needs_real_data`),
+broken-link classifier (`_handle_broken`), on-demand Website CSS doer
+(`website_agent.run_change`, not audit-driven).
+
+## Roadmap (to build — see memory `ascend-doer-roadmap`)
+
+| Planned doer | Will fix |
+|--------------|----------|
+| Redirects | `broken_link`, `broken_page`, `redirect_issue` |
+| Head/meta | `missing_canonical`, `og_incomplete`, `missing_favicon` |
+| Robots | `ai_crawler_blocked` |
+| Schema-cleanup | `schema_invalid`, `schema_placeholder`, `schema_deprecated` |
+| Image v2 / WebP | `image_legacy_format` |
+| Performance | `cwv_poor` (+ unlocks the dormant 10% Performance weight) |
+| Host-level (low priority) | `no_https`, `mixed_content`, `missing_viewport` |
+
+Goal: push the audit toward ~100%. The only finding left unfixable by design is
+the owner-only `needs_real_data` (real phone, license #, prices — "the fake
+number thing").

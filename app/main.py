@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "pipeline-agents-49"
+BUILD = "alt-text-doer-50"
 
 
 @app.get("/version")
@@ -298,7 +298,7 @@ def _pipeline_state(run, report_id=None) -> dict:
     }
 
 
-_DOER_JOB_KINDS = ["elementor", "image", "schema", "technical", "linking", "pagedraft"]
+_DOER_JOB_KINDS = ["elementor", "image", "alttext", "schema", "technical", "linking", "pagedraft"]
 _STATE_PRIORITY = {"active": 3, "failed": 2, "done": 1, "pending": 0}
 
 
@@ -1053,6 +1053,34 @@ def run_links(site_id: int, request: Request, db: Session = Depends(get_db)):
         db.refresh(run)
         from .link_agent import start_footer_links_async
         start_footer_links_async(site_id, run.id, conn)
+    return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
+
+
+@app.post("/sites/{site_id}/run-alt")
+def run_alt(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """Alt-text doer only: write descriptive alt text for images missing it across
+    the site's pages (auto-applied + verified live). One doer per page; a page with
+    no missing alt is a quick no-op."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return RedirectResponse(f"/sites/{site_id}?tab=settings&notice=test_none", status_code=303)
+    from .elementor_agent import list_elementor_pages
+    from .alt_agent import start_alt_text_async
+    for p in list_elementor_pages(conn)[:30]:
+        pid = p.get("id")
+        if not pid:
+            continue
+        run = JobRun(site_id=site_id, kind="alttext", status="running",
+                     summary=f"Writing alt text on {p.get('title') or pid}…")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        start_alt_text_async(site_id, run.id, conn, pid, p.get("title", ""))
     return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
 
 

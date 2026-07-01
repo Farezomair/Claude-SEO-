@@ -111,6 +111,54 @@ Respond with ONLY a JSON object, no preamble and no markdown, in exactly this sh
     return {"title": title, "description": description}
 
 
+def generate_alt_texts(site_name: str, page_title: str, images: list) -> dict:
+    """Write accessibility/SEO alt text for a page's images.
+
+    `images` = [{"src": str, "context": str}] (context = visible text near the
+    image). Returns {src: alt_text}. Alt is concise and specific, grounded in the
+    filename + nearby text; decorative images get an empty string (skipped)."""
+    if not images:
+        return {}
+    lines = []
+    for i, im in enumerate(images):
+        fname = (im.get("src") or "").rsplit("/", 1)[-1].split("?")[0]
+        ctx = (im.get("context") or "")[:200]
+        lines.append(f"{i}. file: {fname}\n   nearby text: {ctx}")
+    listing = "\n".join(lines)
+    prompt = f"""You are writing ALT TEXT for images on a web page, for accessibility and SEO.
+
+Business: {site_name or "(unknown)"}
+Page: {page_title}
+
+For each image you get its filename and the visible text near it. Write concise, specific alt text describing what the image most likely shows, grounded in the filename and nearby text.
+
+Rules:
+- 4-14 words. Describe the subject; be specific to this business/page.
+- Do NOT start with "image of", "photo of", or "picture of".
+- No keyword stuffing, no surrounding quotes, plain descriptive language.
+- If an image is clearly decorative (spacer, divider, icon, background), return an empty string for it.
+- Same language as the page.
+
+Images:
+{listing}
+
+Respond with ONLY a JSON object mapping the image index (as a string) to its alt text, e.g. {{"0": "Custom outdoor kitchen with built-in grill", "1": ""}}. Nothing else."""
+    response = _get_client().messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=1024,
+        system="You write accessibility alt text. You respond only with a single JSON object and nothing else.",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    text = next((b.text for b in response.content if b.type == "text"), "")
+    data = _extract_json(text)
+    out = {}
+    for i, im in enumerate(images):
+        alt = str(data.get(str(i), "")).strip().strip('"')
+        if alt:
+            out[im["src"]] = alt[:125]
+    return out
+
+
 def generate_article(site_name: str, site_url: str, topic: str = "", rules: str = "",
                      instructions: str = "") -> dict:
     """Draft a blog post. Returns {"title", "meta_description", "body_html"}."""

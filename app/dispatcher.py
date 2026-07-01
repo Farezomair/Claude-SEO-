@@ -350,6 +350,22 @@ def _propose_img_dims(db, ctx, f):
     return ("in-progress", "Measuring the images and auto-adding width/height to the live page (invisible, revertible).", False)
 
 
+def _propose_alt(db, ctx, f):
+    """Write descriptive alt text for images missing it (auto-applied + verified)."""
+    item = (ctx.get("items") or {}).get(_norm(f.evidence_url))
+    if not item:
+        return ("no-capability", "Couldn't match this page to write image alt text.", False)
+    pid, title = item["id"], item.get("title", "")
+    from .alt_agent import start_alt_text_async
+    sub = JobRun(site_id=ctx["site"].id, kind="alttext", status="running",
+                 summary=f"Writing alt text on {title or pid}…")
+    db.add(sub)
+    db.commit()
+    db.refresh(sub)
+    start_alt_text_async(ctx["site"].id, sub.id, ctx["conn"], pid, title)  # background, auto-applies
+    return ("in-progress", "Writing descriptive alt text for the images and auto-applying to the live page (verified).", False)
+
+
 def _human_task(db, ctx, f):
     """Owner-only fact (real phone/license/prices). Can't be AI-fixed — surface it
     in Approvals under 'Needs your attention'. Recurs each audit until fixed."""
@@ -363,6 +379,7 @@ HANDLERS = {
     **{c: _propose_rewrite for c in REWRITE_CATS},
     "needs_real_data": _human_task,
     "image_no_dimensions": _propose_img_dims,
+    "images_missing_alt": _propose_alt,
     "required_page_missing": _propose_required_page,
     "duplicate_title": _propose_dedupe,
     "striking_distance": _propose_ranking,
@@ -420,7 +437,7 @@ def dispatch_fixes(site_id: int, progress_run_id: int | None = None) -> dict:
                "wp": WordPressClient(conn["url"], conn["username"], conn["app_password"]),
                "items": None}
         # Build the URL->page map once if any finding needs a page lookup.
-        lookup_cats = META_CATS | REWRITE_CATS | {"duplicate_title", "striking_distance", "low_ctr", "image_no_dimensions"}
+        lookup_cats = META_CATS | REWRITE_CATS | {"duplicate_title", "striking_distance", "low_ctr", "image_no_dimensions", "images_missing_alt"}
         if any(f.category in lookup_cats for f in findings):
             try:
                 _all = [it for it in ctx["wp"].list_content(limit=100) if it.get("link")]
