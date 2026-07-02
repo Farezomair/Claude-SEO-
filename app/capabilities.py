@@ -138,6 +138,10 @@ DOERS = [
      "summary": "remove broken / placeholder / deprecated schema",
      "desc": "Removes invalid, placeholder, or deprecated (FAQPage/HowTo) JSON-LD from the live page — bad structured data is worse than none. Verified live.",
      "job_kinds": ["schemaclean"]},
+    {"key": "perf", "agent": "Performance Agent", "lane": "auto", "status": "active",
+     "summary": "lazy-load offscreen images",
+     "desc": "Adds native lazy-loading to offscreen images (hero kept eager for LCP) — a safe, no-JS Core Web Vitals win. Applied live; CWV field data reflects it over ~4 weeks.",
+     "job_kinds": ["perf"]},
     {"key": "schema", "agent": "Schema Agent", "lane": "approval", "status": "active",
      "summary": "Organization / LocalBusiness JSON-LD",
      "desc": "Generates Organization and LocalBusiness structured data for your review before it goes live.",
@@ -155,9 +159,7 @@ DOERS = [
 # Roadmap — shown as "planned" cards in the viewer (see memory ascend-doer-roadmap).
 PLANNED_DOERS = [
     {"agent": "WebP Agent", "summary": "modern image formats",
-     "desc": "Converts images to WebP/AVIF for faster loads."},
-    {"agent": "Performance Agent", "summary": "Core Web Vitals",
-     "desc": "Improves Core Web Vitals, paired with a PageSpeed analyzer."},
+     "desc": "Converts images to WebP/AVIF for faster loads (needs an auditor that detects legacy formats + a server-side conversion pipeline)."},
 ]
 
 DOER_COUNT = len(DOERS)

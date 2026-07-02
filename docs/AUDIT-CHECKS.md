@@ -86,7 +86,7 @@ Lane = how the matching doer acts: 🟢 auto · 🔵 approval · 🟡 owner-only
 ## Performance — 1 check
 | Check (category) | Detects | Sev | Source | Handled by |
 |---|---|---|---|---|
-| `cwv_poor` | poor Core Web Vitals | — | perf | ⚪ (performance doer) |
+| `cwv_poor` | poor Core Web Vitals | — | perf | 🟢 Performance (lazy-load; CWV field data lags ~4wk) |
 
 ## Defined but not yet emitted (4)
 Categories the router/scorer already understands but no active auditor produces

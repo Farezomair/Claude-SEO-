@@ -435,6 +435,25 @@ def _propose_schema_cleanup(db, ctx, f):
             "Removing broken/placeholder/deprecated structured data from the live page (verified).", False)
 
 
+def _propose_performance(db, ctx, f):
+    """Lazy-load offscreen images (safe CWV win) on the measured page. CWV field
+    data lags ~28 days, so this applies + records but doesn't claim an instant fix —
+    the finding clears when the audit re-measures."""
+    item = (ctx.get("items") or {}).get(_norm(f.evidence_url))
+    if not item:
+        return ("no-capability", "Couldn't match the measured page to optimize it.", False)
+    pid, title = item["id"], item.get("title", "")
+    from .perf_agent import start_perf_async
+    sub = JobRun(site_id=ctx["site"].id, kind="perf", status="running", summary=f"Optimizing {title or pid}…")
+    db.add(sub)
+    db.commit()
+    db.refresh(sub)
+    start_perf_async(ctx["site"].id, sub.id, ctx["conn"], pid, title)  # background, auto-applies
+    return ("in-progress",
+            "Lazy-loading offscreen images to improve Core Web Vitals — applied live; "
+            "CWV field data reflects it over ~4 weeks.", False)
+
+
 def _human_task(db, ctx, f):
     """Owner-only fact (real phone/license/prices). Can't be AI-fixed — surface it
     in Approvals under 'Needs your attention'. Recurs each audit until fixed."""
@@ -457,6 +476,7 @@ HANDLERS = {
     "schema_placeholder": _propose_schema_cleanup,
     "schema_deprecated": _propose_schema_cleanup,
     "ai_crawler_blocked": _propose_robots,
+    "cwv_poor": _propose_performance,
     "required_page_missing": _propose_required_page,
     "duplicate_title": _propose_dedupe,
     "striking_distance": _propose_ranking,
@@ -515,7 +535,7 @@ def dispatch_fixes(site_id: int, progress_run_id: int | None = None) -> dict:
                "items": None}
         # Build the URL->page map once if any finding needs a page lookup.
         lookup_cats = META_CATS | REWRITE_CATS | {"duplicate_title", "striking_distance", "low_ctr",
-                                                  "image_no_dimensions", "images_missing_alt",
+                                                  "image_no_dimensions", "images_missing_alt", "cwv_poor",
                                                   "schema_invalid", "schema_placeholder", "schema_deprecated"}
         if any(f.category in lookup_cats for f in findings):
             try:
