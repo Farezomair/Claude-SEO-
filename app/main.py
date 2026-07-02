@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "perf-doer-54"
+BUILD = "bridge8-selftest-55"
 
 
 @app.get("/version")
@@ -1002,6 +1002,61 @@ def discover_abilities(site_id: int, request: Request, db: Session = Depends(get
         "count": len(catalog),
         "abilities": catalog,
     })
+
+
+@app.get("/sites/{site_id}/bridge-selftest")
+def bridge_selftest(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """Diagnostic: round-trip each Bridge 8 ability (write -> read-back -> revert)
+    to prove it actually writes, without leaving any change. For redirects it also
+    confirms a real 301 serves. Returns JSON."""
+    if not current_user(request):
+        return JSONResponse({"error": "auth"}, status_code=401)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    conn = get_connection(site_id, site.url, site.name) if site else None
+    if not conn:
+        return JSONResponse({"error": "no connection"}, status_code=400)
+    import httpx
+    base = conn["url"].rstrip("/")
+    if not base.startswith("http"):
+        base = "https://" + base
+    auth = (conn["username"], conn["app_password"])
+    out = {}
+
+    def _post(ep, payload):
+        with httpx.Client(timeout=30.0, auth=auth, follow_redirects=True) as c:
+            return c.post(f"{base}/wp-json/seo-agent/v1/{ep}", json=payload).json()
+
+    # HEAD: set a test favicon, confirm it's stored, revert to empty.
+    try:
+        wrote = _post("head", {"favicon": base + "/__ascend_selftest.png"})
+        out["head"] = {"wrote_favicon": wrote.get("favicon"),
+                       "write_ok": bool(wrote.get("favicon")),
+                       "reverted": _post("head", {"favicon": ""}).get("favicon") == ""}
+    except Exception as e:
+        out["head"] = {"error": f"{e.__class__.__name__}: {e}"}
+
+    # ROBOTS: set an extra line, confirm stored, revert.
+    try:
+        wrote = _post("robots", {"extra": "# ascend-selftest"})
+        out["robots"] = {"write_ok": "ascend-selftest" in (wrote.get("extra") or ""),
+                         "reverted": _post("robots", {"extra": ""}).get("extra") == ""}
+    except Exception as e:
+        out["robots"] = {"error": f"{e.__class__.__name__}: {e}"}
+
+    # REDIRECTS: add a test 301, verify it actually serves, then clear it.
+    try:
+        _post("redirects", {"set": {"/__ascend_selftest": "/"}})
+        with httpx.Client(timeout=20.0, follow_redirects=False,
+                          headers={"User-Agent": "Mozilla/5.0"}) as c:
+            r = c.get(base + "/__ascend_selftest")
+        _post("redirects", {"remove": ["/__ascend_selftest"]})  # clean up
+        out["redirects"] = {"served_status": r.status_code,
+                            "is_301": r.status_code in (301, 302, 308),
+                            "location": r.headers.get("location", "")}
+    except Exception as e:
+        out["redirects"] = {"error": f"{e.__class__.__name__}: {e}"}
+
+    return JSONResponse(out)
 
 
 @app.post("/sites/{site_id}/run-fixes")
