@@ -3,14 +3,14 @@
 Single source of truth for how many doers Ascend has and what each one fixes.
 Keep this updated whenever a doer is added/changed.
 
-**Doer count (audit-fixing): 13**
-_Last updated: 2026-07-02 — after Head/meta + Schema-cleanup. Redirects + Head/meta need the combined Bridge 8 (one upload, pending)._
+**Doer count (audit-fixing): 14**
+_Last updated: 2026-07-02 — after Robots. Redirects + Head/meta + Robots need the combined Bridge 8 (one upload, pending)._
 
 A "doer" here = a capability that executes or proposes a fix for an audit
 finding. Lanes: 🟢 auto (applied + verified live) · 🔵 needs owner approval ·
 🟡 owner-only fact (not auto-fixable by design).
 
-## Built (13)
+## Built (14)
 
 | # | Doer | Module / handler | Fixes (audit categories) | Lane |
 |---|------|------------------|--------------------------|------|
@@ -21,6 +21,7 @@ finding. Lanes: 🟢 auto (applied + verified live) · 🔵 needs owner approval
 | 11 | Redirects | `redirect_agent.run_redirects` → `brain.pick_redirect_targets` + Bridge `/redirects` (v8) | `broken_link` (internal), `broken_page` | 🟢 |
 | 12 | Head/meta | `headmeta_agent.run_headmeta` + Bridge `/head` (v8) | `missing_canonical`, `og_incomplete`, `missing_viewport`, `missing_favicon` (favicon best-effort) | 🟢 |
 | 13 | Schema-cleanup | `schema_cleanup_agent.run_schema_cleanup` (removes bad JSON-LD from `_meridian_body`) | `schema_invalid`, `schema_placeholder`, `schema_deprecated` | 🟢 |
+| 14 | Robots | `robots_agent.run_robots` + Bridge `/robots` full-override (v8) | `ai_crawler_blocked` | 🟢 |
 | 4 | Required-pages | `dispatcher._propose_required_page` → `wordpress.create_page` | `required_page_missing` (create + publish) | 🟢 |
 | 5 | Internal-linking | `link_agent.run_footer_links` | `required_page_missing` (orphaned → footer link) | 🟢 |
 | 6 | Technical | `technical_agent.run_technical_fixes` (Bridge) | `security_headers`, `no_llms_txt` | 🟢 |
@@ -36,7 +37,6 @@ broken-link classifier (`_handle_broken`), on-demand Website CSS doer
 
 | Planned doer | Will fix |
 |--------------|----------|
-| Robots | `ai_crawler_blocked` (robots ability already in Bridge 8) |
 | Image v2 / WebP | `image_legacy_format` |
 | Performance | `cwv_poor` (+ unlocks the dormant 10% Performance weight) |
 | Host-level (low priority) | `no_https`, `mixed_content` |

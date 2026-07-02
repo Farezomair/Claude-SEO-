@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "headmeta-schema-52"
+BUILD = "robots-doer-53"
 
 
 @app.get("/version")
@@ -299,7 +299,7 @@ def _pipeline_state(run, report_id=None) -> dict:
 
 
 _DOER_JOB_KINDS = ["elementor", "image", "alttext", "schema", "schemaclean", "technical",
-                   "headmeta", "linking", "redirects", "pagedraft"]
+                   "headmeta", "robots", "linking", "redirects", "pagedraft"]
 _STATE_PRIORITY = {"active": 3, "failed": 2, "done": 1, "pending": 0}
 
 
@@ -1135,6 +1135,31 @@ def run_headmeta_now(site_id: int, request: Request, db: Session = Depends(get_d
         db.refresh(run)
         from .headmeta_agent import start_headmeta_async
         start_headmeta_async(site_id, run.id, conn)
+    return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
+
+
+@app.post("/sites/{site_id}/run-robots")
+def run_robots_now(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """Robots doer only: unblock AI crawlers in robots.txt (verified live). Needs
+    SEO Agent Bridge v8+."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return RedirectResponse(f"/sites/{site_id}?tab=settings&notice=test_none", status_code=303)
+    already = (db.query(JobRun)
+               .filter(JobRun.site_id == site_id, JobRun.kind == "robots", JobRun.status == "running")
+               .first())
+    if not already:
+        run = JobRun(site_id=site_id, kind="robots", status="running", summary="Unblocking AI crawlers…")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        from .robots_agent import start_robots_async
+        start_robots_async(site_id, run.id, conn)
     return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
 
 

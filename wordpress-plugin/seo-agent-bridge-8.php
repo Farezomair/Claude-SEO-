@@ -132,6 +132,8 @@ add_action('wp_head', function () {
 
 // Extend robots.txt from a stored option (e.g. explicitly allow AI crawlers).
 add_filter('robots_txt', function ($output, $public) {
+    $full = (string) get_option('seo_agent_robots_full', '');
+    if ($full !== '') { return $full; }           // full override (e.g. unblock AI crawlers)
     $extra = (string) get_option('seo_agent_robots_extra', '');
     if ($extra !== '') { $output .= "
 " . $extra . "
@@ -272,8 +274,12 @@ function seo_agent_head_set($request) {
 function seo_agent_robots_set($request) {
     $extra = $request->get_param('extra');
     if ($extra !== null) { update_option('seo_agent_robots_extra', (string) $extra); }
+    $full = $request->get_param('full');
+    if ($full !== null) { update_option('seo_agent_robots_full', (string) $full); }
     do_action('litespeed_purge_all');
-    return array('ok' => true, 'extra' => (string) get_option('seo_agent_robots_extra', ''));
+    return array('ok' => true,
+                 'full'  => (string) get_option('seo_agent_robots_full', ''),
+                 'extra' => (string) get_option('seo_agent_robots_extra', ''));
 }
 
 /* ===========================================================================

@@ -114,6 +114,10 @@ DOERS = [
      "summary": "create + publish missing pages",
      "desc": "Generates and publishes missing required pages (privacy, terms, about, contact, accessibility) at the right slug.",
      "job_kinds": ["pagedraft"]},
+    {"key": "robots", "agent": "Robots Agent", "lane": "auto", "status": "active",
+     "summary": "unblock AI crawlers",
+     "desc": "Removes robots.txt blocks on AI crawlers (GPTBot, ClaudeBot, PerplexityBot, …) so your pages can be cited by AI search. Verified live.",
+     "job_kinds": ["robots"]},
     {"key": "linking", "agent": "Linking Agent", "lane": "auto", "status": "active",
      "summary": "footer links",
      "desc": "Links orphaned-but-published pages into the footer so the audit, Google, and visitors can reach them. Verified live.",
@@ -150,8 +154,6 @@ DOERS = [
 
 # Roadmap — shown as "planned" cards in the viewer (see memory ascend-doer-roadmap).
 PLANNED_DOERS = [
-    {"agent": "Robots Agent", "summary": "AI crawler access",
-     "desc": "Opens robots.txt so AI assistants (GPTBot, etc.) can crawl the site."},
     {"agent": "WebP Agent", "summary": "modern image formats",
      "desc": "Converts images to WebP/AVIF for faster loads."},
     {"agent": "Performance Agent", "summary": "Core Web Vitals",

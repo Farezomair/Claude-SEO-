@@ -403,6 +403,21 @@ def _propose_headmeta(db, ctx, f):
             "Adding the missing head tags (canonical / Open Graph / viewport / favicon) — auto, verified live.", False)
 
 
+def _propose_robots(db, ctx, f):
+    """Unblock AI crawlers in robots.txt (fires once per run, verified live)."""
+    if ctx.get("robots_done"):
+        return ("in-progress", "Covered by the robots.txt fix running this run.", False)
+    from .robots_agent import start_robots_async
+    rj = JobRun(site_id=ctx["site"].id, kind="robots", status="running", summary="Unblocking AI crawlers…")
+    db.add(rj)
+    db.commit()
+    db.refresh(rj)
+    start_robots_async(ctx["site"].id, rj.id, ctx["conn"])
+    ctx["robots_done"] = True
+    return ("in-progress",
+            "Removing the robots.txt block on AI crawlers (GPTBot, ClaudeBot, …) — auto, verified live.", False)
+
+
 def _propose_schema_cleanup(db, ctx, f):
     """Remove broken/placeholder/deprecated JSON-LD from the page (auto, verified)."""
     item = (ctx.get("items") or {}).get(_norm(f.evidence_url))
@@ -441,6 +456,7 @@ HANDLERS = {
     "schema_invalid": _propose_schema_cleanup,
     "schema_placeholder": _propose_schema_cleanup,
     "schema_deprecated": _propose_schema_cleanup,
+    "ai_crawler_blocked": _propose_robots,
     "required_page_missing": _propose_required_page,
     "duplicate_title": _propose_dedupe,
     "striking_distance": _propose_ranking,

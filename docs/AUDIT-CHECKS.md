@@ -70,7 +70,7 @@ Lane = how the matching doer acts: 🟢 auto · 🔵 approval · 🟡 owner-only
 | `no_llms_txt` | no `/llms.txt` | low | crawler | 🟢 Technical |
 | `geo_unstructured` | not citable by AI answers | low–high | content | 🟢 Rewrite |
 | `no_entity_schema` | no Organization/Website entity | med | crawler | 🔵 Schema |
-| `ai_crawler_blocked` | robots.txt blocks GPTBot/etc. | med | crawler | ⚪ (robots doer) |
+| `ai_crawler_blocked` | robots.txt blocks GPTBot/etc. | med | crawler | 🟢 Robots |
 
 ## Local — 2 checks
 | Check (category) | Detects | Sev | Source | Handled by |
