@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "bridge8-selftest-55"
+BUILD = "stale-doers-56"
 
 
 @app.get("/version")
@@ -301,6 +301,12 @@ def _pipeline_state(run, report_id=None) -> dict:
 _DOER_JOB_KINDS = ["elementor", "image", "alttext", "schema", "schemaclean", "technical",
                    "headmeta", "robots", "perf", "linking", "redirects", "pagedraft"]
 _STATE_PRIORITY = {"active": 3, "failed": 2, "done": 1, "pending": 0}
+# Doer runs execute on in-process daemon threads, so any JobRun still 'running'
+# from BEFORE this process booted is a ghost (a redeploy killed its thread) — the
+# pipeline must not wait on it. 45 min is the hung-thread backstop (rewrites are
+# semaphore-queued, so late ones can legitimately wait a while).
+_BOOT_TIME = utcnow()
+_DOER_STALE_MINUTES = 45
 
 
 def _merge_state(a, b):
@@ -321,15 +327,25 @@ def _doer_states(db, site_id, run):
     if not run:
         return [{"agent": d["agent"], "lane": d["lane"], "state": "pending"} for d in DOERS], False
     since = run.created_at
-    kind_state, any_active = {}, False
+    kind_state, any_active, stale_marked = {}, False, False
     for j in (db.query(JobRun)
               .filter(JobRun.site_id == site_id, JobRun.created_at >= since,
                       JobRun.kind.in_(_DOER_JOB_KINDS)).all()):
+        if j.status == "running" and j.created_at and (
+                j.created_at < _BOOT_TIME
+                or (utcnow() - j.created_at) > timedelta(minutes=_DOER_STALE_MINUTES)):
+            # Ghost job: its thread died on a redeploy (or hung). Fail it so the
+            # pipeline stops waiting on it.
+            j.status = "failed"
+            j.summary = (j.summary or "") + " (interrupted by a restart — will be retried next run)"
+            stale_marked = True
         st = ("active" if j.status == "running" else "done" if j.status == "completed"
               else "failed" if j.status == "failed" else "pending")
         if st == "active":
             any_active = True
         kind_state[j.kind] = _merge_state(kind_state.get(j.kind), st)
+    if stale_marked:
+        db.commit()
     fr = db.query(FixRecord).filter(FixRecord.site_id == site_id, FixRecord.created_at >= since).all()
     ap = db.query(Approval).filter(Approval.site_id == site_id, Approval.created_at >= since).all()
     inline = {
