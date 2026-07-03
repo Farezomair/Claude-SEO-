@@ -57,6 +57,7 @@
       {% endfor %}
     </div>
 
+    {% if planned_doers %}
     <h3 style="margin-top:22px;">Planned</h3>
     <p class="muted" style="margin-top:-2px; font-size:13px;">On the roadmap — these flip to active as we build them.</p>
     <div class="cap-grid">
@@ -71,6 +72,9 @@
       </div>
       {% endfor %}
     </div>
+    {% else %}
+    <p class="muted" style="margin-top:22px; font-size:13px;">Roadmap complete — every planned doer is built. New capabilities land here as they're planned.</p>
+    {% endif %}
   </div>
 </div>
 

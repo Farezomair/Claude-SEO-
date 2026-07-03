@@ -4,11 +4,11 @@ Single source of truth for how many things Ascend audits and what each check is.
 Keep this updated whenever an auditor/check is added or changed. Pairs with
 `DOERS.md` (the fix side).
 
-**Audit check count (active): 41** across 4 auditors.
+**Audit check count (active): 42** across 4 auditors.
 _Last updated: 2026-07-01._
 
 Auditors (pipeline in `jobs._run_audit`):
-- **Crawler** (`crawler.py`) — 33 checks (homepage + up to 15 pages + site-level)
+- **Crawler** (`crawler.py`) — 34 checks (homepage + up to 15 pages + site-level)
 - **Content / E-E-A-T** (`content_analyzer.py` → Claude, `brain.CONTENT_CATS`) — 5
 - **Search Console** (`gsc.py`, when connected) — 2
 - **Performance** (`perf.py`, scored only when it runs) — 1
@@ -78,24 +78,25 @@ Lane = how the matching doer acts: 🟢 auto · 🔵 approval · 🟡 owner-only
 | `no_localbusiness_schema` | no LocalBusiness markup | low | crawler | 🔵 Schema |
 | `nap_missing` | name/address/phone absent | low | crawler | 🟢 Rewrite (real NAP → 🟡) |
 
-## Images — 1 check
+## Images — 2 checks
 | Check (category) | Detects | Sev | Source | Handled by |
 |---|---|---|---|---|
 | `image_no_dimensions` | no width/height (layout shift) | low | crawler | 🟢 Image dimensions |
+| `image_legacy_format` | JPEG/PNG where WebP/AVIF could serve (imgix CDN without auto=format, or plain .jpg/.png) | low | crawler | 🟢 WebP |
 
 ## Performance — 1 check
 | Check (category) | Detects | Sev | Source | Handled by |
 |---|---|---|---|---|
 | `cwv_poor` | poor Core Web Vitals | — | perf | 🟢 Performance (lazy-load; CWV field data lags ~4wk) |
 
-## Defined but not yet emitted (4)
+## Defined but not yet emitted (3)
 Categories the router/scorer already understands but no active auditor produces
 yet — they light up when the matching auditor logic is added:
 `meta_title`, `meta_description` (sitewide meta scan), `low_internal_links`
-(on-page link-depth), `image_legacy_format` (WebP/AVIF detection).
+(on-page link-depth).
 
 ---
 Note: some categories bundle multiple sub-checks (`indexation` = noindex +
 robots.txt + sitemap; `structure` = header + footer; `broken_link` = internal +
 external at several severities), so the literal number of probes run per page is
-higher than 41 — but 41 is the count of distinct routable/scored check-types.
+higher than 42 — but 42 is the count of distinct routable/scored check-types.

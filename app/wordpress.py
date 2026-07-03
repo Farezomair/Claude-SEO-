@@ -144,6 +144,20 @@ class WordPressClient:
         return {"id": data.get("id"), "link": data.get("link", ""),
                 "status": data.get("status", status), "slug": data.get("slug", slug)}
 
+    def upload_media(self, filename: str, content: bytes, mime: str) -> str:
+        """Upload a file to the WordPress media library (standard REST). Returns
+        the hosted file's URL. Raises WordPressError on failure."""
+        with self._client() as c:
+            r = c.post(
+                f"{self.base}/wp-json/wp/v2/media",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"',
+                         "Content-Type": mime},
+                content=content,
+            )
+        if r.status_code not in (200, 201):
+            raise WordPressError(f"HTTP {r.status_code} uploading media: {r.text[:200]}")
+        return (r.json() or {}).get("source_url", "") or ""
+
     def update_content(self, kind: str, item_id: int, content_html: str) -> None:
         """Replace a post/page's content body (used by the Content Corrector)."""
         with self._client() as c:

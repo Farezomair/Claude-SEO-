@@ -112,6 +112,21 @@ LOCALBUSINESS_SUBTYPES = {
 PHONE_RE = re.compile(r"\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}")
 
 
+# Imgix-style image CDNs where `auto=format` enables WebP/AVIF content negotiation.
+IMGIX_HOSTS = ("images.unsplash.com", "images.pexels.com")
+
+
+def _legacy_format_src(src: str) -> bool:
+    """True if this image src serves a legacy format a doer could modernize:
+    an imgix-style CDN URL missing auto=format, or a plain .jpg/.png file."""
+    if not src or src.startswith("data:"):
+        return False
+    low = src.lower()
+    if any(h in low for h in IMGIX_HOSTS):
+        return "auto=format" not in low
+    return bool(re.search(r"\.(jpe?g|png)(\?|#|$)", low)) and ".webp" not in low
+
+
 def _ai_blocked(robots_txt: str) -> list[str]:
     """Return which AI crawlers are disallowed from the whole site in robots.txt."""
     blocked: set[str] = set()
@@ -289,6 +304,14 @@ def crawl_site(start_url: str) -> dict:
             if imgs and len(no_dim) >= max(3, len(imgs) // 2):
                 issues.append(_issue("image_no_dimensions", "low", page_url,
                                      f"{len(no_dim)} of {len(imgs)} images have no width/height set (can cause layout shift / CLS)"))
+            # Legacy image formats — JPEG/PNG where WebP/AVIF could serve instead.
+            # Two cases: an imgix-style CDN (Unsplash/Pexels) missing auto=format
+            # (defaults to JPEG), or a plain .jpg/.png file.
+            legacy = [i for i in imgs if _legacy_format_src(i.get("src") or "")]
+            if legacy:
+                issues.append(_issue("image_legacy_format", "low", page_url,
+                                     f"{len(legacy)} of {len(imgs)} images serve legacy formats (JPEG/PNG) — "
+                                     "WebP/AVIF would load faster"))
 
             # --- on-page depth (expanded battery) ---
             md = soup.find("meta", attrs={"name": re.compile(r"^description$", re.I)})

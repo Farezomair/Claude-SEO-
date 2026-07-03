@@ -435,6 +435,23 @@ def _propose_schema_cleanup(db, ctx, f):
             "Removing broken/placeholder/deprecated structured data from the live page (verified).", False)
 
 
+def _propose_webp(db, ctx, f):
+    """Serve the page's images as WebP/AVIF (CDN auto=format or convert+rehost)."""
+    item = (ctx.get("items") or {}).get(_norm(f.evidence_url))
+    if not item:
+        return ("no-capability", "Couldn't match this page to modernize its images.", False)
+    pid, title = item["id"], item.get("title", "")
+    from .webp_agent import start_webp_async
+    sub = JobRun(site_id=ctx["site"].id, kind="webp", status="running",
+                 summary=f"Modernizing images on {title or pid}…")
+    db.add(sub)
+    db.commit()
+    db.refresh(sub)
+    start_webp_async(ctx["site"].id, sub.id, ctx["conn"], pid, title)  # background, auto-applies
+    return ("in-progress",
+            "Switching the images to WebP/AVIF (CDN format negotiation, or convert + rehost) — verified live.", False)
+
+
 def _propose_performance(db, ctx, f):
     """Lazy-load offscreen images (safe CWV win) on the measured page. CWV field
     data lags ~28 days, so this applies + records but doesn't claim an instant fix —
@@ -477,6 +494,7 @@ HANDLERS = {
     "schema_deprecated": _propose_schema_cleanup,
     "ai_crawler_blocked": _propose_robots,
     "cwv_poor": _propose_performance,
+    "image_legacy_format": _propose_webp,
     "required_page_missing": _propose_required_page,
     "duplicate_title": _propose_dedupe,
     "striking_distance": _propose_ranking,
@@ -536,6 +554,7 @@ def dispatch_fixes(site_id: int, progress_run_id: int | None = None) -> dict:
         # Build the URL->page map once if any finding needs a page lookup.
         lookup_cats = META_CATS | REWRITE_CATS | {"duplicate_title", "striking_distance", "low_ctr",
                                                   "image_no_dimensions", "images_missing_alt", "cwv_poor",
+                                                  "image_legacy_format",
                                                   "schema_invalid", "schema_placeholder", "schema_deprecated"}
         if any(f.category in lookup_cats for f in findings):
             try:

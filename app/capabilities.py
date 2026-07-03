@@ -80,7 +80,7 @@ AUDIT_CATEGORIES = [
      "desc": "Image health.",
      "checks": [
          {"label": "Width/height set (no layout shift)", "status": "active"},
-         {"label": "Modern formats (WebP/AVIF)", "status": "planned"},
+         {"label": "Modern formats (WebP/AVIF)", "status": "active"},
      ]},
     {"key": "performance", "label": "Performance", "weight": 10,
      "desc": "Core Web Vitals and page-load speed.",
@@ -142,6 +142,10 @@ DOERS = [
      "summary": "lazy-load offscreen images",
      "desc": "Adds native lazy-loading to offscreen images (hero kept eager for LCP) — a safe, no-JS Core Web Vitals win. Applied live; CWV field data reflects it over ~4 weeks.",
      "job_kinds": ["perf"]},
+    {"key": "webp", "agent": "WebP Agent", "lane": "auto", "status": "active",
+     "summary": "serve images as WebP/AVIF",
+     "desc": "Switches JPEG/PNG images to modern formats — image-CDN URLs get format negotiation (auto=format), local files are converted to WebP and rehosted. Verified live.",
+     "job_kinds": ["webp"]},
     {"key": "schema", "agent": "Schema Agent", "lane": "approval", "status": "active",
      "summary": "Organization / LocalBusiness JSON-LD",
      "desc": "Generates Organization and LocalBusiness structured data for your review before it goes live.",
@@ -157,10 +161,9 @@ DOERS = [
 ]
 
 # Roadmap — shown as "planned" cards in the viewer (see memory ascend-doer-roadmap).
-PLANNED_DOERS = [
-    {"agent": "WebP Agent", "summary": "modern image formats",
-     "desc": "Converts images to WebP/AVIF for faster loads (needs an auditor that detects legacy formats + a server-side conversion pipeline)."},
-]
+# Empty: every roadmap doer is built. Host-level gaps (no_https, mixed_content,
+# redirect chains) are server settings, not doers.
+PLANNED_DOERS = []
 
 DOER_COUNT = len(DOERS)
 AUDIT_CHECK_COUNT = sum(len(c["checks"]) for c in AUDIT_CATEGORIES)
