@@ -245,9 +245,22 @@ def _propose_ranking(db, ctx, f):
         return ("escalated", f"Rewrite generation failed ({exc.__class__.__name__}).", False)
     if not sugg.get("title") and not sugg.get("description"):
         return ("open", "No stronger title/description found.", False)
+    # GA4 enrichment (enhance-bar toggle): show the page's real organic traffic so
+    # the owner can judge how much this ranking win is worth.
+    ga4_note = ""
+    from .capabilities import cap_setting
+    if cap_setting("ranking", "use_ga4", False):
+        if "ga4_pages" not in ctx:
+            from .ga4 import organic_sessions_by_page
+            ctx["ga4_pages"] = organic_sessions_by_page()
+        if ctx["ga4_pages"]:
+            path = urlparse(item["link"]).path.rstrip("/") or "/"
+            ga4_note = f" GA4: ~{ctx['ga4_pages'].get(path, 0)} organic visits in the last 28 days."
+        else:
+            ga4_note = " GA4: enabled but no data — reconnect Google to grant the Analytics permission."
     db.add(Approval(site_id=ctx["site"].id, kind="meta_rewrite",
                     title=f"Boost ranking page: {item['link']}",
-                    summary=f"Stronger title/description to win more clicks. “{sugg.get('title','')}”.",
+                    summary=f"Stronger title/description to win more clicks. “{sugg.get('title','')}”.{ga4_note}",
                     payload=json.dumps({"finding_id": f.id, "page_kind": item["kind"], "page_id": item["id"],
                                         "new_title": sugg.get("title", ""), "new_desc": sugg.get("description", ""),
                                         "old_title": cur_title, "old_desc": cur_desc}),
@@ -301,7 +314,7 @@ def _propose_rewrite(db, ctx, f):
     if _pending_payload_match(db, ctx["site"].id, "page_rewrite", "page_id", pid):
         ctx["rewrite_pages"].add(pid)
         return ("in-progress", "A full-page SEO rewrite for this page is already waiting in Approvals.", False)
-    if ctx["rewrites_used"] >= MAX_REWRITES:
+    if ctx["rewrites_used"] >= ctx.get("max_rewrites", MAX_REWRITES):
         return ("open", "Queued — full-page rewrite cap reached this run; will continue next run.", False)
     from .elementor_agent import start_page_rewrite_async
     sub = JobRun(site_id=ctx["site"].id, kind="elementor", status="running",
@@ -547,8 +560,10 @@ def dispatch_fixes(site_id: int, progress_run_id: int | None = None) -> dict:
         findings.sort(key=lambda x: (SEVERITY_RANK.get(x.severity, 5), x.category))
         total = len(findings)
 
+        from .capabilities import cap_setting
         ctx = {"site": site, "conn": conn, "auto_used": 0, "rewrites_used": 0, "flush": False,
                "schema_done": False, "rewrite_pages": set(),
+               "max_rewrites": int(cap_setting("elementor", "max_rewrites_per_run", MAX_REWRITES)),
                "wp": WordPressClient(conn["url"], conn["username"], conn["app_password"]),
                "items": None}
         # Build the URL->page map once if any finding needs a page lookup.

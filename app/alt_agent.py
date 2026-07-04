@@ -30,7 +30,7 @@ def _needs_alt(tag: str) -> bool:
     return m is None or not m.group(1).strip()
 
 
-def _imgs_needing_alt(html: str) -> list[tuple[str, str]]:
+def _imgs_needing_alt(html: str, max_images: int = MAX_IMAGES) -> list[tuple[str, str]]:
     """Return [(src, nearby_text)] for images missing alt (deduped by src)."""
     out, seen = [], set()
     for m in IMG_RE.finditer(html):
@@ -44,7 +44,7 @@ def _imgs_needing_alt(html: str) -> list[tuple[str, str]]:
         seen.add(src)
         ctx = BeautifulSoup(html[max(0, m.start() - 400):m.end() + 220], "html.parser").get_text(" ", strip=True)
         out.append((src, ctx[:200]))
-        if len(out) >= MAX_IMAGES:
+        if len(out) >= max_images:
             break
     return out
 
@@ -89,7 +89,8 @@ def run_alt_text(site_id: int, run_id: int, conn: dict, page_id: int, page_title
             db.commit()
             return
 
-        need = _imgs_needing_alt(old_html)
+        from .capabilities import cap_setting
+        need = _imgs_needing_alt(old_html, int(cap_setting("alttext", "max_images_per_page", MAX_IMAGES)))
         if not need:
             run.status = "completed"
             run.summary = "No images missing alt text."

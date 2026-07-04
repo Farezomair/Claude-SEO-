@@ -176,3 +176,84 @@ def agent_for_job_kind(kind: str) -> str | None:
         if kind in d["job_kinds"]:
             return d["agent"]
     return None
+
+
+# ---- Tunables: the settings the AI enhance bar may change ------------------
+# Declared schema per capability key (doer keys above, or audit category keys
+# prefixed "audit:"). The AI can ONLY set these — anything else becomes a
+# captured CapabilityRequest. Server-side validation enforces type + range.
+TUNABLES = {
+    "ranking": [
+        {"param": "use_ga4", "type": "bool", "default": False,
+         "label": "Use GA4 traffic data",
+         "desc": "Enrich ranking proposals with each page's real organic visits from "
+                 "Google Analytics 4 (needs Google reconnected with the Analytics scope)."},
+        {"param": "gsc_lookback_days", "type": "int", "default": 90, "min": 28, "max": 180,
+         "label": "Search Console lookback (days)",
+         "desc": "How far back to read Search Console when hunting ranking opportunities."},
+    ],
+    "elementor": [
+        {"param": "max_rewrites_per_run", "type": "int", "default": 20, "min": 1, "max": 40,
+         "label": "Max page rewrites per run",
+         "desc": "Upper bound on full-page SEO rewrites in one run (each is a large AI call)."},
+    ],
+    "alttext": [
+        {"param": "max_images_per_page", "type": "int", "default": 12, "min": 1, "max": 40,
+         "label": "Max images described per page",
+         "desc": "How many missing-alt images to describe on one page per run."},
+    ],
+    "webp": [
+        {"param": "quality", "type": "int", "default": 82, "min": 50, "max": 95,
+         "label": "WebP quality",
+         "desc": "Quality for locally converted WebP images (higher = larger files)."},
+    ],
+    "audit:content": [
+        {"param": "pages_analyzed", "type": "int", "default": 15, "min": 5, "max": 30,
+         "label": "Pages deep-read per audit",
+         "desc": "How many pages the AI content/E-E-A-T analyzer reads each audit."},
+    ],
+    "audit:technical": [
+        {"param": "crawl_pages", "type": "int", "default": 30, "min": 5, "max": 40,
+         "label": "Pages crawled per audit",
+         "desc": "How many pages the crawler examines each audit."},
+    ],
+}
+
+
+def validate_change(key: str, param: str, value):
+    """Coerce+validate one change against the declared tunable. Returns the
+    coerced value, or raises ValueError."""
+    spec = next((t for t in TUNABLES.get(key, []) if t["param"] == param), None)
+    if not spec:
+        raise ValueError(f"'{param}' is not a tunable of '{key}'")
+    if spec["type"] == "bool":
+        if isinstance(value, str):
+            value = value.strip().lower() in ("1", "true", "yes", "on")
+        return bool(value)
+    if spec["type"] == "int":
+        value = int(value)
+        return max(spec["min"], min(spec["max"], value))
+    raise ValueError(f"unknown tunable type for '{param}'")
+
+
+def cap_setting(key: str, param: str, default=None):
+    """Read one capability setting (doers call this at run time). Falls back to
+    the declared default, then `default`. Never raises."""
+    try:
+        import json
+        from .database import SessionLocal
+        from .models import CapabilitySetting
+        db = SessionLocal()
+        try:
+            row = db.query(CapabilitySetting).filter(
+                CapabilitySetting.capability_key == key).first()
+            if row:
+                vals = json.loads(row.settings or "{}")
+                if param in vals:
+                    return vals[param]
+        finally:
+            db.close()
+    except Exception:
+        pass
+    spec = next((t for t in TUNABLES.get(key, []) if t["param"] == param), None)
+    return spec["default"] if spec and default is None else default

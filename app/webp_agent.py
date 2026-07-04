@@ -54,7 +54,7 @@ def _imgix_modern(src: str) -> str:
     return src + ("&auto=format" if "?" in src else "?auto=format")
 
 
-def _convert_to_webp(data: bytes) -> bytes | None:
+def _convert_to_webp(data: bytes, quality: int = WEBP_QUALITY) -> bytes | None:
     try:
         from PIL import Image
     except ImportError:
@@ -64,7 +64,7 @@ def _convert_to_webp(data: bytes) -> bytes | None:
         if im.mode in ("P", "CMYK"):
             im = im.convert("RGBA" if "transparency" in im.info else "RGB")
         buf = io.BytesIO()
-        im.save(buf, "WEBP", quality=WEBP_QUALITY, method=4)
+        im.save(buf, "WEBP", quality=quality, method=4)
         out = buf.getvalue()
         return out if len(out) < len(data) else out  # smaller or equal is fine
     except Exception:
@@ -109,6 +109,8 @@ def run_webp(site_id: int, run_id: int, conn: dict, page_id: int, page_title: st
             return
 
         wp = WordPressClient(conn["url"], conn["username"], conn["app_password"])
+        from .capabilities import cap_setting
+        quality = int(cap_setting("webp", "quality", WEBP_QUALITY))
         swaps: dict[str, str] = {}
         converted = 0
         for src in srcs:
@@ -126,7 +128,7 @@ def run_webp(site_id: int, run_id: int, conn: dict, page_id: int, page_title: st
                     r = c.get(url)
                 if r.status_code != 200 or len(r.content) > FETCH_LIMIT:
                     continue
-                webp = _convert_to_webp(r.content)
+                webp = _convert_to_webp(r.content, quality)
                 if not webp:
                     continue
                 stem = (urlparse(url).path.rsplit("/", 1)[-1].rsplit(".", 1)[0] or "image")[:60]

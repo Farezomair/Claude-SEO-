@@ -16,6 +16,15 @@ from .brain import analyze_page_content
 REQUEST_TIMEOUT = 12.0
 USER_AGENT = "SEO-Agent-Auditor/1.0 (+read-only audit)"
 MAX_PAGES = 15  # homepage + service/location/content pages — full-site content audit
+
+
+def _max_pages() -> int:
+    """Enhance-bar tunable: how many pages the content analyzer deep-reads."""
+    from .capabilities import cap_setting
+    try:
+        return int(cap_setting("audit:content", "pages_analyzed", MAX_PAGES))
+    except Exception:
+        return MAX_PAGES
                 # (so the dispatcher can drive rewrites across every weak page)
 UTILITY = ("contact", "privacy", "terms", "cart", "checkout", "login", "account",
            "thank", "search", "404", "wp-")
@@ -54,7 +63,7 @@ def _pick_pages(client, start_url):
             continue
         seen.add(path)
         pages.append(link)
-        if len(pages) >= MAX_PAGES:
+        if len(pages) >= _max_pages():
             break
     return pages
 

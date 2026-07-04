@@ -4,13 +4,36 @@
 <div class="container wide">
   <p class="muted" style="margin-bottom:10px;"><a href="/sites">&larr; All websites</a></p>
 
+  {% macro enhance_panel(key) %}
+  <details class="enh">
+    <summary>✨ Enhance</summary>
+    {% set tuns = tunables.get(key) %}
+    {% if tuns %}
+    <div class="enh-tuns">
+      {% for t in tuns %}
+      <div class="enh-tun">
+        <span>{{ t.label }}</span>
+        <b>{{ 'On' if t.value is true else ('Off' if t.value is false else t.value) }}</b>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <form class="enh-form" onsubmit="return enhSubmit(event, '{{ key }}')">
+      <input type="text" name="text" required maxlength="500"
+             placeholder="Tell the AI how to tune or extend this capability…">
+      <button class="btn small" type="submit">Send</button>
+    </form>
+    <div class="enh-reply" data-key="{{ key }}"></div>
+  </details>
+  {% endmacro %}
+
   <!-- AUDIT CHECKS -->
   <div class="card" id="audit">
     <div class="row-between">
       <h1 style="margin:0;">Audit checks</h1>
       <span class="muted" style="font-size:13px;">{{ audit_active_count }} of {{ audit_check_count }} checks active &middot; {{ audit_categories|length }} categories</span>
     </div>
-    <p class="muted" style="margin:8px 0 0;">Everything Ascend scans for and grades your site on. Read-only for now — tuning each capability will live here later.</p>
+    <p class="muted" style="margin:8px 0 0;">Everything Ascend scans for and grades your site on. Click <strong>✨ Enhance</strong> on a category to tune it or ask for more.</p>
     <div class="cap-grid">
       {% for c in audit_categories %}
       <div class="cap-card">
@@ -28,6 +51,7 @@
           </li>
           {% endfor %}
         </ul>
+        {{ enhance_panel('audit:' ~ c.key) }}
       </div>
       {% endfor %}
     </div>
@@ -43,6 +67,7 @@
       The agents that fix what the audit finds.
       <span class="lane lane-auto">auto</span> applies &amp; verifies live;
       <span class="lane lane-approval">approval</span> proposes a change for your yes/no.
+      Click <strong>✨ Enhance</strong> to tune an agent or ask for a new power.
     </p>
     <div class="cap-grid">
       {% for d in doers %}
@@ -53,6 +78,7 @@
         </div>
         <p class="muted" style="font-size:12px; margin:4px 0 0;">{{ d.summary }}</p>
         <p style="font-size:13px; margin:8px 0 0;">{{ d.desc }}</p>
+        {{ enhance_panel(d.key) }}
       </div>
       {% endfor %}
     </div>
@@ -73,14 +99,31 @@
       {% endfor %}
     </div>
     {% else %}
-    <p class="muted" style="margin-top:22px; font-size:13px;">Roadmap complete — every planned doer is built. New capabilities land here as they're planned.</p>
+    <p class="muted" style="margin-top:22px; font-size:13px;">Roadmap complete — every planned doer is built. Asks the built-in tunables can't cover land below as requested enhancements.</p>
     {% endif %}
   </div>
+
+  <!-- REQUESTED ENHANCEMENTS -->
+  {% if cap_requests %}
+  <div class="card" id="requests">
+    <h2 style="margin:0;">Requested enhancements</h2>
+    <p class="muted" style="margin:8px 0 0; font-size:13px;">Asks from the enhance bar that need a new build — the working list for the next round of capabilities.</p>
+    <div style="margin-top:14px; display:flex; flex-direction:column; gap:10px;">
+      {% for r in cap_requests %}
+      <div class="req-row">
+        <span class="req-key">{{ r.capability_key }}</span>
+        <span style="flex:1;">{{ r.summary or r.request_text }}</span>
+        <span class="lane lane-planned">{{ r.status }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
 </div>
 
 <style>
   .cap-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(270px, 1fr)); gap:14px; margin-top:16px; }
-  .cap-card { background:var(--panel-2); border:1px solid var(--border); border-radius:14px; padding:16px 18px; }
+  .cap-card { background:var(--panel-2); border:1px solid var(--border); border-radius:14px; padding:16px 18px; display:flex; flex-direction:column; }
   .cap-card h3 { font-size:15px; }
   .cap-checks { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:7px; }
   .cap-checks li { font-size:13px; display:flex; align-items:center; gap:9px; line-height:1.35; }
@@ -93,5 +136,50 @@
   .lane-approval { background:rgba(125,211,252,.16); color:#7dd3fc; }
   .lane-planned { background:rgba(148,163,184,.16); color:#94a3b8; }
   .cap-card.planned { opacity:.7; }
+  .enh { margin-top:auto; padding-top:12px; }
+  .enh > summary { cursor:pointer; font-size:12.5px; color:var(--accent); list-style:none; }
+  .enh > summary::-webkit-details-marker { display:none; }
+  .enh-tuns { margin:10px 0 2px; display:flex; flex-direction:column; gap:5px; }
+  .enh-tun { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); gap:10px; }
+  .enh-tun b { color:var(--text); font-weight:600; }
+  .enh-form { display:flex; gap:7px; margin-top:9px; }
+  .enh-form input { flex:1; min-width:0; padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:#0f1219; color:#e5e7eb; font:inherit; font-size:12.5px; }
+  .enh-reply { font-size:12.5px; margin-top:8px; line-height:1.45; display:none; }
+  .enh-reply.ok { display:block; color:#6ee7b7; }
+  .enh-reply.req { display:block; color:#7dd3fc; }
+  .enh-reply.err { display:block; color:#fda4af; }
+  .req-row { display:flex; align-items:center; gap:12px; font-size:13px; background:var(--panel-2); border:1px solid var(--border); border-radius:10px; padding:10px 14px; }
+  .req-key { font-size:11px; color:var(--muted); background:rgba(148,163,184,.12); border-radius:6px; padding:2px 8px; white-space:nowrap; }
 </style>
+<script>
+  function enhSubmit(ev, key) {
+    ev.preventDefault();
+    var form = ev.target;
+    var input = form.querySelector('input[name=text]');
+    var btn = form.querySelector('button');
+    var box = form.parentElement.querySelector('.enh-reply');
+    btn.disabled = true; btn.textContent = 'Thinking…';
+    box.className = 'enh-reply'; box.style.display = 'none';
+    var body = new URLSearchParams(); body.set('text', input.value);
+    fetch('/capabilities/' + encodeURIComponent(key) + '/enhance', {
+      method: 'POST', credentials: 'same-origin',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: body.toString()
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      btn.disabled = false; btn.textContent = 'Send';
+      box.className = 'enh-reply ' + (d.ok ? (d.action === 'set' ? 'ok' : 'req') : 'err');
+      box.textContent = d.reply || 'Done.';
+      if (d.ok && d.applied && Object.keys(d.applied).length) {
+        input.value = '';
+        setTimeout(function () { location.reload(); }, 1600);
+      } else if (d.ok && d.captured) {
+        input.value = '';
+      }
+    }).catch(function () {
+      btn.disabled = false; btn.textContent = 'Send';
+      box.className = 'enh-reply err'; box.textContent = 'Something went wrong — try again.';
+    });
+    return false;
+  }
+</script>
 {% endblock %}

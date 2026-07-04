@@ -111,6 +111,52 @@ Respond with ONLY a JSON object, no preamble and no markdown, in exactly this sh
     return {"title": title, "description": description}
 
 
+def interpret_capability_request(cap_label: str, cap_desc: str, tunables: list, text: str) -> dict:
+    """The enhance bar's brain. Given a capability, its declared tunables (with
+    current values), and the owner's free-text ask, decide:
+    - action "set": the ask maps onto declared tunables -> {"changes": {param: value}}
+    - action "request": a real enhancement we haven't built -> captured for the roadmap
+    Returns {"action", "changes", "summary", "reply"} — reply is shown to the owner.
+    """
+    tun_lines = "\n".join(
+        f"- {t['param']} ({t['type']}"
+        + (f", {t['min']}–{t['max']}" if t["type"] == "int" else "")
+        + f", current: {t.get('value', t['default'])}): {t['desc']}"
+        for t in tunables) or "(none)"
+    prompt = f"""You manage the settings of one capability of an SEO platform.
+
+Capability: {cap_label}
+What it does: {cap_desc}
+
+Tunable settings you are allowed to change (NOTHING else can be changed):
+{tun_lines}
+
+The owner asked:
+\"\"\"{text}\"\"\"
+
+Decide:
+- If the ask maps onto the tunables above, action is "set" with the new values (booleans true/false, integers within range).
+- Otherwise action is "request": a capability enhancement to capture for the build roadmap. Summarize it crisply.
+- Never invent settings that aren't listed. If the ask is partly tunable, set what you can AND capture the rest as a request (action "set" with a non-empty "also_request").
+
+Respond with ONLY a JSON object:
+{{"action": "set|request", "changes": {{"param": value}}, "also_request": "", "summary": "one-line summary of what was asked", "reply": "1-2 friendly sentences to the owner: what you changed or that the request was captured for the roadmap"}}"""
+    response = _get_client().messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=600,
+        system="You configure capability settings. You respond only with a single JSON object and nothing else.",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    out = _extract_json(next((b.text for b in response.content if b.type == "text"), ""))
+    return {
+        "action": out.get("action", "request"),
+        "changes": out.get("changes") or {},
+        "also_request": str(out.get("also_request", "") or "").strip(),
+        "summary": str(out.get("summary", "")).strip()[:300],
+        "reply": str(out.get("reply", "")).strip()[:500],
+    }
+
+
 def generate_alt_texts(site_name: str, page_title: str, images: list) -> dict:
     """Write accessibility/SEO alt text for a page's images.
 

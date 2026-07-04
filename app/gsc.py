@@ -56,6 +56,15 @@ def search_analytics(access_token: str, prop: str, days: int = 90,
         return []
 
 
+def _lookback() -> int:
+    """Enhance-bar tunable: Search Console lookback window (days)."""
+    from .capabilities import cap_setting
+    try:
+        return int(cap_setting("ranking", "gsc_lookback_days", 90))
+    except Exception:
+        return 90
+
+
 def gsc_findings(site_url: str) -> list[dict]:
     """Return audit-issue dicts from Search Console, or [] if not connected/matched."""
     token = get_access_token()
@@ -67,7 +76,7 @@ def gsc_findings(site_url: str) -> list[dict]:
 
     issues: list[dict] = []
     # Striking-distance queries: ranking pos 5-20 with real impressions = page-1 opportunities.
-    for row in search_analytics(token, prop, days=90, dimensions=("query",)):
+    for row in search_analytics(token, prop, days=_lookback(), dimensions=("query",)):
         keys = row.get("keys") or [""]
         q, pos, imp = keys[0], row.get("position", 0), row.get("impressions", 0)
         if 5 <= pos <= 20 and imp >= 20:
@@ -77,7 +86,7 @@ def gsc_findings(site_url: str) -> list[dict]:
                 "finding_type": "opportunity", "detection_source": "search console",
             })
     # Low-CTR pages: high impressions, weak click-through = title/meta opportunity.
-    for row in search_analytics(token, prop, days=90, dimensions=("page",)):
+    for row in search_analytics(token, prop, days=_lookback(), dimensions=("page",)):
         keys = row.get("keys") or [""]
         page, imp, ctr, pos = keys[0], row.get("impressions", 0), row.get("ctr", 0), row.get("position", 0)
         if imp >= 100 and pos <= 10 and ctr < 0.02:

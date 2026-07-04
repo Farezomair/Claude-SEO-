@@ -308,3 +308,30 @@ class RunLog(Base):
     created_at = Column(DateTime, default=utcnow)
 
     site = relationship("Site", back_populates="logs")
+
+
+class CapabilitySetting(Base):
+    """Per-capability tuning applied through the AI enhance bar (app-level, one
+    row per capability). `settings` is a JSON object of param -> value, validated
+    against the capability's declared tunables before it is ever written."""
+
+    __tablename__ = "capability_settings"
+
+    id = Column(Integer, primary_key=True)
+    capability_key = Column(String(50), unique=True, nullable=False)
+    settings = Column(Text, default="{}")
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class CapabilityRequest(Base):
+    """An enhancement the owner asked for that isn't a built tunable yet — the
+    AI bar captures it here (the 'needs a new build' lane of the hybrid model)."""
+
+    __tablename__ = "capability_requests"
+
+    id = Column(Integer, primary_key=True)
+    capability_key = Column(String(50), nullable=False)
+    request_text = Column(Text, nullable=False)
+    summary = Column(Text, default="")
+    status = Column(String(20), default="open")  # open, planned, done, dismissed
+    created_at = Column(DateTime, default=utcnow)

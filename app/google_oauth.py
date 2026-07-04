@@ -16,7 +16,8 @@ from .models import GoogleAuth, utcnow
 
 CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "")
 CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
-SCOPE = "openid email https://www.googleapis.com/auth/webmasters.readonly"
+SCOPE = ("openid email https://www.googleapis.com/auth/webmasters.readonly "
+         "https://www.googleapis.com/auth/analytics.readonly")
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"

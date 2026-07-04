@@ -169,6 +169,17 @@ def _sitemap_locs(client, text: str, depth: int = 0) -> set:
     return set(locs)
 
 MAX_PAGES = 30
+
+
+def _max_crawl_pages() -> int:
+    """Enhance-bar tunable: how many pages the crawler examines per audit."""
+    from .capabilities import cap_setting
+    try:
+        return int(cap_setting("audit:technical", "crawl_pages", MAX_PAGES))
+    except Exception:
+        return MAX_PAGES
+
+
 MAX_LINK_CHECKS = 150
 MAX_QUEUE = MAX_PAGES * 4
 REQUEST_TIMEOUT = 8.0
@@ -231,7 +242,8 @@ def crawl_site(start_url: str) -> dict:
     origin = f"{urlparse(start_url).scheme}://{urlparse(start_url).netloc}"
     headers = {"User-Agent": USER_AGENT}
     with httpx.Client(follow_redirects=True, timeout=REQUEST_TIMEOUT, headers=headers) as client:
-        while queue and pages_crawled < MAX_PAGES:
+        max_pages = _max_crawl_pages()
+        while queue and pages_crawled < max_pages:
             page_url = queue.pop(0)
             if page_url in visited:
                 continue
@@ -470,7 +482,7 @@ def crawl_site(start_url: str) -> dict:
         # page cap); otherwise a page linked from an uncrawled page looks falsely
         # orphaned. So we skip orphan detection on sites larger than the cap.
         internal_sitemap = {u for u in sitemap_urls if _same_domain(u, start_url)}
-        if internal_sitemap and pages_crawled < MAX_PAGES:
+        if internal_sitemap and pages_crawled < max_pages:
             reachable = {_normalize(u) for u in linked_internal} | {_normalize(u) for u in visited}
             orphans = [u for u in internal_sitemap
                        if _normalize(u) not in reachable and _normalize(u) != home_norm]

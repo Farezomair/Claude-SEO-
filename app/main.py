@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "webp-doer-57"
+BUILD = "enhance-bar-58"
 
 
 @app.get("/version")
@@ -1695,14 +1695,32 @@ def _approval_items(db, site_id=None) -> list:
     return items
 
 
+def _tunables_with_values(db) -> dict:
+    """TUNABLES enriched with current values from capability_settings."""
+    from .capabilities import TUNABLES
+    from .models import CapabilitySetting
+    stored = {}
+    for row in db.query(CapabilitySetting).all():
+        try:
+            stored[row.capability_key] = json.loads(row.settings or "{}")
+        except Exception:
+            stored[row.capability_key] = {}
+    out = {}
+    for key, specs in TUNABLES.items():
+        out[key] = [{**t, "value": stored.get(key, {}).get(t["param"], t["default"])}
+                    for t in specs]
+    return out
+
+
 @app.get("/capabilities", response_class=HTMLResponse)
 def capabilities_view(request: Request, db: Session = Depends(get_db)):
-    """Read-only viewer of Ascend's powers — what it audits and the doers that
-    fix it. Fed by the capability registry (app/capabilities.py)."""
+    """Viewer of Ascend's powers — what it audits and the doers that fix it —
+    with the per-capability AI enhance bar. Fed by the capability registry."""
     if not current_user(request):
         return RedirectResponse("/login", status_code=303)
     from .capabilities import (AUDIT_CATEGORIES, DOERS, PLANNED_DOERS,
                                DOER_COUNT, AUDIT_CHECK_COUNT, AUDIT_ACTIVE_COUNT)
+    from .models import CapabilityRequest
     return templates.TemplateResponse("capabilities.html", {
         "request": request,
         "user": current_user(request),
@@ -1712,6 +1730,78 @@ def capabilities_view(request: Request, db: Session = Depends(get_db)):
         "doer_count": DOER_COUNT,
         "audit_check_count": AUDIT_CHECK_COUNT,
         "audit_active_count": AUDIT_ACTIVE_COUNT,
+        "tunables": _tunables_with_values(db),
+        "cap_requests": (db.query(CapabilityRequest)
+                         .filter(CapabilityRequest.status != "dismissed")
+                         .order_by(CapabilityRequest.created_at.desc()).limit(20).all()),
+    })
+
+
+@app.post("/capabilities/{key:path}/enhance")
+def capabilities_enhance(key: str, request: Request, text: str = Form(...),
+                         db: Session = Depends(get_db)):
+    """The AI enhance bar. Hybrid model: asks that map onto the capability's
+    DECLARED tunables are validated and applied instantly; anything else is
+    captured as a CapabilityRequest for the build roadmap. The AI can never
+    touch a setting that isn't declared in capabilities.TUNABLES."""
+    if not current_user(request):
+        return JSONResponse({"error": "auth"}, status_code=401)
+    from .capabilities import AUDIT_CATEGORIES, DOERS, TUNABLES, validate_change
+    from .models import CapabilityRequest, CapabilitySetting
+
+    cap = next((d for d in DOERS if d["key"] == key), None)
+    if cap:
+        label, desc = cap["agent"], cap["desc"]
+    elif key.startswith("audit:"):
+        c = next((c for c in AUDIT_CATEGORIES if c["key"] == key.split(":", 1)[1]), None)
+        if not c:
+            return JSONResponse({"error": "unknown capability"}, status_code=404)
+        label, desc = f"Audit — {c['label']}", c["desc"]
+    else:
+        return JSONResponse({"error": "unknown capability"}, status_code=404)
+
+    tunables = _tunables_with_values(db).get(key, [])
+    from .brain import interpret_capability_request
+    try:
+        result = interpret_capability_request(label, desc, tunables, text.strip()[:1000])
+    except Exception as exc:
+        return JSONResponse({"ok": False, "reply": f"Couldn't interpret that ({exc.__class__.__name__}) — try rephrasing."})
+
+    applied, rejected = {}, []
+    if result["action"] == "set":
+        for param, value in (result["changes"] or {}).items():
+            try:
+                applied[param] = validate_change(key, param, value)
+            except (ValueError, TypeError) as e:
+                rejected.append(str(e))
+        if applied:
+            row = (db.query(CapabilitySetting)
+                   .filter(CapabilitySetting.capability_key == key).first())
+            vals = {}
+            if row:
+                try:
+                    vals = json.loads(row.settings or "{}")
+                except Exception:
+                    vals = {}
+            else:
+                row = CapabilitySetting(capability_key=key, settings="{}")
+                db.add(row)
+            vals.update(applied)
+            row.settings = json.dumps(vals)
+
+    captured = ""
+    if result["action"] == "request" or result.get("also_request"):
+        captured = result.get("also_request") or result["summary"] or text.strip()[:300]
+        db.add(CapabilityRequest(capability_key=key, request_text=text.strip()[:1000],
+                                 summary=captured))
+    db.commit()
+    return JSONResponse({
+        "ok": True,
+        "action": result["action"],
+        "applied": applied,
+        "rejected": rejected,
+        "captured": captured,
+        "reply": result["reply"] or ("Applied." if applied else "Captured for the roadmap."),
     })
 
 
