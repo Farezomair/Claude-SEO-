@@ -8,7 +8,7 @@
     {% if publish_status == 'publish' %}<strong>and publishes it live</strong>{% else %}as a <strong>draft</strong> (you give it a final look and hit Publish in WordPress){% endif %}.
   </p>
 
-  {% if notice == 'task_done' %}<div class="card"><p style="margin:0; color:#4ade80;">Marked done — the next audit will re-check it.</p></div>{% endif %}
+  {% if notice == 'task_done' %}<div class="card"><p style="margin:0; color:#0a9b6d;">Marked done — the next audit will re-check it.</p></div>{% endif %}
   {% if notice == 'task_snoozed' %}<div class="card"><p style="margin:0;" class="muted">Deferred — it'll reappear after the next audit if still unfixed.</p></div>{% endif %}
 
   {% if human_tasks %}
@@ -35,7 +35,7 @@
     <h2 style="margin-top:24px;">Approvals</h2>
   {% endif %}
 
-  {% if notice == 'approved' %}<div class="card"><p style="margin:0; color:#4ade80;">Approved and sent to WordPress.</p></div>{% endif %}
+  {% if notice == 'approved' %}<div class="card"><p style="margin:0; color:#0a9b6d;">Approved and sent to WordPress.</p></div>{% endif %}
   {% if notice == 'rejected' %}<div class="card"><p style="margin:0;" class="muted">Rejected and discarded.</p></div>{% endif %}
   {% if notice == 'no_connection' %}<div class="card"><div class="error">Can't publish — that site has no WordPress connection. Set it up in the site's Settings tab.</div></div>{% endif %}
   {% if notice == 'publish_fail' %}<div class="card"><div class="error">Approved, but sending to WordPress failed. Check the connection and try again.</div></div>{% endif %}
@@ -63,14 +63,14 @@
       {% if item.code %}
         <details>
           <summary style="cursor:pointer; color:var(--accent);">Preview code</summary>
-          <pre style="border:1px solid var(--border); border-radius:8px; padding:16px; margin-top:12px; max-height:360px; overflow:auto; background:#0f1219; color:#cbd5e1; font-size:13px; white-space:pre-wrap;">{{ item.code }}</pre>
+          <pre style="border:1px solid var(--border); border-radius:8px; padding:16px; margin-top:12px; max-height:360px; overflow:auto; background:var(--panel-3); color:var(--text); font-size:13px; white-space:pre-wrap;">{{ item.code }}</pre>
         </details>
       {% endif %}
       {% if item.text_diff %}
         <details open>
           <summary style="cursor:pointer; color:var(--accent);">What changed (text)</summary>
-          <pre style="border:1px solid var(--border); border-radius:8px; padding:16px; margin-top:12px; max-height:320px; overflow:auto; background:#0f1219; font-size:13px; white-space:pre-wrap; line-height:1.5;">{% for kind, line in item.text_diff %}{% if kind == 'add' %}<span style="color:#4ade80;">+ {{ line }}</span>
-{% elif kind == 'del' %}<span style="color:#f87171;">- {{ line }}</span>
+          <pre style="border:1px solid var(--border); border-radius:8px; padding:16px; margin-top:12px; max-height:320px; overflow:auto; background:var(--panel-3); font-size:13px; white-space:pre-wrap; line-height:1.5;">{% for kind, line in item.text_diff %}{% if kind == 'add' %}<span style="color:#0a9b6d;">+ {{ line }}</span>
+{% elif kind == 'del' %}<span style="color:#dc4664;">- {{ line }}</span>
 {% else %}<span style="color:#6b7280;">  {{ line }}</span>
 {% endif %}{% endfor %}</pre>
         </details>
@@ -84,7 +84,7 @@
         </details>
         <details>
           <summary style="cursor:pointer; color:var(--accent);">View HTML source</summary>
-          <pre style="border:1px solid var(--border); border-radius:8px; padding:16px; margin-top:12px; max-height:360px; overflow:auto; background:#0f1219; color:#cbd5e1; font-size:12px; white-space:pre-wrap;">{{ item.preview_html }}</pre>
+          <pre style="border:1px solid var(--border); border-radius:8px; padding:16px; margin-top:12px; max-height:360px; overflow:auto; background:var(--panel-3); color:var(--text); font-size:12px; white-space:pre-wrap;">{{ item.preview_html }}</pre>
         </details>
       {% endif %}
       {% set k = item.approval.kind %}
@@ -115,7 +115,7 @@
           <input type="hidden" name="return_to" value="/approvals">
           <textarea name="instructions" rows="3" required
             placeholder="Tell the AI what to change — e.g. 'warmer tone and mention our 10-year warranty', 'shorter title', 'drop the FAQ section'…"
-            style="width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--border); border-radius:8px; background:#0f1219; color:#e5e7eb; font:inherit;"></textarea>
+            style="width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--border); border-radius:8px; background:#fff; color:var(--text); font:inherit;"></textarea>
           <button class="btn" type="submit" style="margin-top:8px;">Send to AI &amp; regenerate</button>
         </form>
       </details>

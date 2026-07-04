@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "enhance-bar-58"
+BUILD = "saas-ui-59"
 
 
 @app.get("/version")
@@ -215,10 +215,26 @@ def list_sites(request: Request, gnotice: str = "", db: Session = Depends(get_db
         return RedirectResponse("/login", status_code=303)
     sites = db.query(Site).order_by(Site.created_at.desc()).all()
     pending_count = db.query(Approval).filter(Approval.status == "pending").count()
+    open_findings = (db.query(Finding)
+                     .filter(Finding.status.in_(("open", "in-progress", "needs-human")))
+                     .count())
+    needs_you = db.query(Finding).filter(Finding.status == "needs-human").count()
+    # Latest completed-audit health per site, for the site rows.
+    site_health = {}
+    for s in sites:
+        a = (db.query(Audit)
+             .filter(Audit.site_id == s.id, Audit.status == "completed",
+                     Audit.health_score.isnot(None))
+             .order_by(Audit.created_at.desc()).first())
+        if a:
+            site_health[s.id] = {"score": a.health_score, "grade": a.grade or "?"}
+    running = db.query(JobRun).filter(JobRun.kind == "weekly", JobRun.status == "running").count()
     return templates.TemplateResponse(
         "sites.html",
         {"request": request, "sites": sites, "user": current_user(request),
-         "pending_count": pending_count, "gnotice": gnotice},
+         "pending_count": pending_count, "gnotice": gnotice, "nav": "home",
+         "open_findings": open_findings, "needs_you": needs_you,
+         "site_health": site_health, "running": running},
     )
 
 

@@ -179,8 +179,8 @@
         {% if item.approval.summary %}<p style="margin:8px 0;">{{ item.approval.summary }}</p>{% endif %}
         {% if item.text_diff %}
           <details><summary style="cursor:pointer; color:var(--accent);">What changed (text)</summary>
-            <pre style="border:1px solid var(--border); border-radius:8px; padding:12px; max-height:300px; overflow:auto; background:#0f1219; font-size:12.5px; white-space:pre-wrap; line-height:1.5;">{% for kind, line in item.text_diff %}{% if kind == 'add' %}<span style="color:#4ade80;">+ {{ line }}</span>
-{% elif kind == 'del' %}<span style="color:#f87171;">- {{ line }}</span>
+            <pre style="border:1px solid var(--border); border-radius:8px; padding:12px; max-height:300px; overflow:auto; background:var(--panel-3); font-size:12.5px; white-space:pre-wrap; line-height:1.5;">{% for kind, line in item.text_diff %}{% if kind == 'add' %}<span style="color:#0a9b6d;">+ {{ line }}</span>
+{% elif kind == 'del' %}<span style="color:#dc4664;">- {{ line }}</span>
 {% endif %}{% endfor %}</pre>
           </details>
         {% endif %}
@@ -196,7 +196,7 @@
         {% endif %}
         {% if item.code %}
           <details><summary style="cursor:pointer; color:var(--accent);">Preview code</summary>
-            <pre style="border:1px solid var(--border); border-radius:8px; padding:14px; margin-top:10px; max-height:340px; overflow:auto; background:#0f1219; color:#cbd5e1; font-size:12px; white-space:pre-wrap;">{{ item.code }}</pre>
+            <pre style="border:1px solid var(--border); border-radius:8px; padding:14px; margin-top:10px; max-height:340px; overflow:auto; background:var(--panel-3); color:var(--text); font-size:12px; white-space:pre-wrap;">{{ item.code }}</pre>
           </details>
         {% endif %}
         {% set k = item.approval.kind %}
@@ -228,7 +228,7 @@
             <input type="hidden" name="return_to" value="{{ rt }}">
             <textarea name="instructions" rows="3" required
               placeholder="Tell the AI what to change — e.g. 'warmer tone and mention our 10-year warranty', 'shorter title', 'drop the FAQ section'…"
-              style="width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--border); border-radius:8px; background:#0f1219; color:#e5e7eb; font:inherit;"></textarea>
+              style="width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--border); border-radius:8px; background:#fff; color:var(--text); font:inherit;"></textarea>
             <button class="btn small" type="submit" style="margin-top:8px;">Send to AI &amp; regenerate</button>
           </form>
         </details>
@@ -300,11 +300,11 @@
     function esc(s){ var d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML; }
 
     function lvBar(name, state, lane) {
-      var dot = lane ? '<span class="lv-dot" style="background:' + (lane === 'auto' ? '#34d399' : '#7dd3fc') + '"></span>' : '';
+      var dot = lane ? '<span class="lv-dot" style="background:' + (lane === 'auto' ? '#34d399' : '#0284c7') + '"></span>' : '';
       var w = state === 'done' ? '100%' : (state === 'active' ? '42%' : '0%');
       var anim = state === 'active' ? 'anim' : '';
       var tick = state === 'done' ? '✓' : (state === 'failed' ? '!' : '');
-      var tcol = state === 'failed' ? '#fda4af' : '#34d399';
+      var tcol = state === 'failed' ? '#dc4664' : '#0a9b6d';
       return '<div class="lv-row ' + (state === 'pending' ? 'lv-pending' : '') + '">'
         + '<span class="lv-name">' + dot + esc(name) + '</span>'
         + '<span class="lv-track"><i class="' + anim + '" style="width:' + w + '"></i></span>'
@@ -338,7 +338,7 @@
         var log = last.fix_log || [];
         if (!log.length) { box.innerHTML = '<p class="muted">No fixes worked yet this run.</p>'; return; }
         box.innerHTML = '<div class="log">' + log.map(function(r){
-          var col = r.status==='closed' ? '#6ee7b7' : (r.status==='in-progress' ? '#7dd3fc' : (r.status==='no-capability' ? '#99a2b5' : '#fda4af'));
+          var col = r.status==='closed' ? '#0a9b6d' : (r.status==='in-progress' ? '#0284c7' : (r.status==='no-capability' ? '#8a93a6' : '#dc4664'));
           var ic = r.status==='closed' ? '✓' : (r.status==='in-progress' ? '⏳' : (r.status==='no-capability' ? '–' : '!'));
           return '<div class="log-row"><span class="ic" style="color:'+col+'">'+ic+'</span><div><div>'+esc(r.issue)+'</div><div style="color:'+col+'; font-size:12px;">'+esc(r.remark)+'</div></div></div>';
         }).join('') + '</div>';

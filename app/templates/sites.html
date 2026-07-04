@@ -1,13 +1,7 @@
 {% extends "base.html" %}
-{% block title %}Websites &middot; Ascend{% endblock %}
+{% block title %}Home &middot; Ascend{% endblock %}
 {% block body %}
 <div class="container">
-  <div class="row-between" style="margin-bottom:24px;">
-    <div>
-      <h1>Websites</h1>
-      <p class="muted" style="margin:0;">Each site gets its own private workspace and crew of agents.</p>
-    </div>
-  </div>
 
   {% if gnotice == 'connected' %}<div class="notice notice-success">Google Search Console connected. Re-run an audit to pull ranking data.</div>{% endif %}
   {% if gnotice == 'disconnected' %}<div class="notice notice-muted">Google disconnected.</div>{% endif %}
@@ -15,6 +9,78 @@
   {% if gnotice in ('failed', 'no_refresh') %}<div class="notice notice-danger">Google connection failed. Try again, and make sure you granted access.</div>{% endif %}
   {% if gnotice == 'not_configured' %}<div class="notice notice-danger">Google isn't set up yet — the OAuth client ID/secret are missing in Railway.</div>{% endif %}
 
+  <!-- Greeting -->
+  <div class="card" style="padding:28px 28px 26px;">
+    <div class="hello-kicker"><span style="font-size:15px;">👋</span> Today</div>
+    <h1 class="hello-h">Good to see you, <span class="nm">{{ user|capitalize }}</span></h1>
+    <p class="muted" style="margin:10px 0 0; font-size:14.5px;">Your SEO crew runs itself — here's what's open, what's fixed, and what needs your yes.</p>
+    <div class="plate">
+      <span><b>{{ pending_count }}</b> approval{{ '' if pending_count == 1 else 's' }} waiting</span>
+      <span><b>{{ open_findings }}</b> open finding{{ '' if open_findings == 1 else 's' }}</span>
+      {% if needs_you %}<span><b>{{ needs_you }}</b> need{{ 's' if needs_you == 1 else '' }} a fact only you have</span>{% endif %}
+      {% if running %}<span><b>{{ running }}</b> crew run{{ '' if running == 1 else 's' }} in progress</span>{% endif %}
+    </div>
+  </div>
+
+  <!-- Stat cards -->
+  <div class="stat-row">
+    <a class="stat-card" href="/approvals" style="color:inherit;">
+      <div class="stat-ico" style="background:#eef2ff;">📋</div>
+      <div>
+        <div class="stat-n">{{ pending_count }}</div>
+        <div class="stat-l">Approvals waiting</div>
+        <div class="stat-s">to review &amp; apply</div>
+      </div>
+    </a>
+    <div class="stat-card">
+      <div class="stat-ico" style="background:#fdf3dc;">🔍</div>
+      <div>
+        <div class="stat-n">{{ open_findings }}</div>
+        <div class="stat-l">Open findings</div>
+        <div class="stat-s">the crew is working through</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-ico" style="background:#e5f6ef;">🌐</div>
+      <div>
+        <div class="stat-n">{{ sites|length }}</div>
+        <div class="stat-l">Websites</div>
+        <div class="stat-s">each with its own agent crew</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Websites -->
+  <div class="card">
+    <div class="row-between" style="margin-bottom:6px;">
+      <h2 style="margin:0;">Your websites</h2>
+      <span class="muted" style="font-size:12.5px;">{{ sites|length }} site{{ '' if sites|length == 1 else 's' }}</span>
+    </div>
+    {% if sites %}
+      {% for site in sites %}
+      {% set h = site_health.get(site.id) %}
+      <a href="/sites/{{ site.id }}" class="site-row" style="color:inherit;">
+        <div class="avatar">{{ site.name[0]|upper }}</div>
+        <div style="flex:1; min-width:0;">
+          <div style="font-weight:700;">{{ site.name }}</div>
+          <div class="muted" style="font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ site.url }}</div>
+        </div>
+        {% if h %}
+          {% if h.score >= 90 %}<span class="health-pill" style="background:#e5f6ef; color:#087443;">{{ h.score }} · {{ h.grade }}</span>
+          {% elif h.score >= 70 %}<span class="health-pill" style="background:#fdf3dc; color:#946300;">{{ h.score }} · {{ h.grade }}</span>
+          {% else %}<span class="health-pill" style="background:#fdecef; color:#b42346;">{{ h.score }} · {{ h.grade }}</span>{% endif %}
+        {% else %}
+          <span class="health-pill" style="background:#eef0f6; color:#5b6472;">not audited</span>
+        {% endif %}
+        <span class="muted" style="font-size:16px;">›</span>
+      </a>
+      {% endfor %}
+    {% else %}
+      <div class="empty">No websites yet. Add your first one below.</div>
+    {% endif %}
+  </div>
+
+  <!-- Add website -->
   <div class="card">
     <h2>Add a website</h2>
     <form method="post" action="/sites">
@@ -31,28 +97,5 @@
       </div>
     </form>
   </div>
-
-  {% if sites %}
-  <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:16px; margin-top:20px;">
-    {% for site in sites %}
-    <a href="/sites/{{ site.id }}" class="card" style="display:block; margin:0; transition:transform .12s, border-color .15s;"
-       onmouseover="this.style.transform='translateY(-2px)';this.style.borderColor='#3a4356'"
-       onmouseout="this.style.transform='';this.style.borderColor=''">
-      <div style="display:flex; align-items:center; gap:12px;">
-        <div style="width:38px; height:38px; border-radius:10px; background:linear-gradient(135deg,var(--accent),var(--accent-2)); display:flex; align-items:center; justify-content:center; font-weight:700; color:#fff;">
-          {{ site.name[0]|upper }}
-        </div>
-        <div style="overflow:hidden;">
-          <div style="font-weight:600; color:var(--text);">{{ site.name }}</div>
-          <div class="muted" style="font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ site.url }}</div>
-        </div>
-      </div>
-      <div class="muted" style="font-size:12px; margin-top:14px;">Added {{ site.created_at.strftime('%Y-%m-%d') if site.created_at else '' }}</div>
-    </a>
-    {% endfor %}
-  </div>
-  {% else %}
-  <div class="empty" style="margin-top:20px;">No websites yet. Add your first one above.</div>
-  {% endif %}
 </div>
 {% endblock %}
