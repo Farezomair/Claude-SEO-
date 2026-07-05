@@ -14,8 +14,8 @@ finding. Lanes: 🟢 auto (applied + verified live) · 🔵 needs owner approval
 
 | # | Doer | Module / handler | Fixes (audit categories) | Lane |
 |---|------|------------------|--------------------------|------|
-| 1 | Meta | `dispatcher._fix_meta` → `wordpress.py` (query-aware via the Keyword Brain) | `meta_title`, `meta_description`, `missing_title`, `meta_description_missing`, `title_length`, `keyword_targeting` | 🟢 |
-| 2 | Elementor rewrite | `elementor_agent.run_page_rewrite` | `thin_content`, `eeat_weak`, `content_shallow`, `content_stale`, `geo_unstructured`, `heading_hierarchy`, `missing_h1`, `multiple_h1`, `nap_missing` | 🟢 if safe, else 🔵 |
+| 1 | Meta | `dispatcher._fix_meta` → `wordpress.py` (query-aware via the Keyword Brain) | `meta_title`, `meta_description`, `missing_title`, `meta_description_missing`, `title_length`, `keyword_targeting`, `stale_year_title` | 🟢 |
+| 2 | Elementor rewrite | `elementor_agent.run_page_rewrite` | `thin_content`, `eeat_weak`, `content_shallow`, `content_stale`, `geo_unstructured`, `heading_hierarchy`, `missing_h1`, `multiple_h1`, `nap_missing`, `heading_concat` | 🟢 if safe, else 🔵 |
 | 3 | Image dimensions | `image_agent.run_image_dims` | `image_no_dimensions` | 🟢 |
 | 4 | Required-pages | `dispatcher._propose_required_page` → `wordpress.create_page` | `required_page_missing` (create + publish) | 🟢 |
 | 5 | Linking | `link_agent.run_footer_links` + `context_link_agent.run_context_links` | `required_page_missing` (orphaned → footer link), `low_internal_links` (contextual in-body links, query-aware anchors) | 🟢 |
@@ -26,7 +26,7 @@ finding. Lanes: 🟢 auto (applied + verified live) · 🔵 needs owner approval
 | 10 | Alt-text | `alt_agent.run_alt_text` → `brain.generate_alt_texts` | `images_missing_alt` | 🟢 |
 | 11 | Redirects | `redirect_agent.run_redirects` → `brain.pick_redirect_targets` + Bridge `/redirects` (v8) | `broken_link` (internal), `broken_page` | 🟢 |
 | 12 | Head/meta | `headmeta_agent.run_headmeta` + Bridge `/head` (v8) | `missing_canonical`, `og_incomplete`, `missing_viewport`, `missing_favicon` (favicon best-effort) | 🟢 |
-| 13 | Schema-cleanup | `schema_cleanup_agent.run_schema_cleanup` (removes bad JSON-LD from `_meridian_body`) | `schema_invalid`, `schema_placeholder`, `schema_deprecated` | 🟢 |
+| 13 | Schema-cleanup | `schema_cleanup_agent.run_schema_cleanup` (removes bad JSON-LD from `_meridian_body`) | `schema_invalid`, `schema_placeholder`, `schema_deprecated`, `schema_selfserving_reviews`, `schema_duplicate_entity` | 🟢 |
 | 14 | Robots | `robots_agent.run_robots` + Bridge `/robots` full-override (v8) | `ai_crawler_blocked` | 🟢 |
 | 15 | Performance | `perf_agent.run_perf` (lazy-load offscreen imgs in `_meridian_body`) | `cwv_poor` | 🟢 applied* |
 | 16 | WebP | `webp_agent.run_webp` (imgix `auto=format` or Pillow-convert + WP media rehost) | `image_legacy_format` | 🟢 |

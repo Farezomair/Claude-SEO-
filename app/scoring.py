@@ -13,6 +13,12 @@ the score). Weights mirror the SEO-audit skill's category weighting.
 from .routing import classify
 
 SEVERITY_PENALTY = {"blocker": 40, "critical": 28, "high": 16, "medium": 8, "low": 3}
+CRITICAL_SEVS = {"blocker", "critical"}
+# Trust findings cap their category regardless of per-page density — fabricated
+# data poisons a category the way a real auditor grades it, no matter how many
+# clean pages surround it.
+TRUST_CATEGORIES = {"fabricated_contact", "fabricated_credential", "schema_selfserving_reviews",
+                    "schema_fake_address", "stock_images_hotlinked"}
 SEVERITY_IMPACT = {"blocker": 5, "critical": 4, "high": 3, "medium": 2, "low": 1}
 EFFORT = {"auto-safe": 1, "needs-approval": 2, "needs-human": 3}
 
@@ -81,6 +87,9 @@ def compute(issues: list[dict], measured: set | None = None, content_pages: int 
     measured = measured if measured is not None else MEASURED
     pen = {k: 0 for k, _, _ in CATEGORIES}
     count = {k: 0 for k, _, _ in CATEGORIES}
+    crit_in = {k: 0 for k, _, _ in CATEGORIES}
+    trust_in = {k: 0 for k, _, _ in CATEGORIES}
+    total_criticals = 0
     enriched = []
     for iss in issues:
         cls = classify(iss["category"])
@@ -88,6 +97,11 @@ def compute(issues: list[dict], measured: set | None = None, content_pages: int 
         sev = iss.get("severity", "low")
         pen[cat] += SEVERITY_PENALTY.get(sev, 3)  # accumulate raw; normalize below
         count[cat] += 1
+        if sev in CRITICAL_SEVS:
+            crit_in[cat] += 1
+            total_criticals += 1
+        if iss["category"] in TRUST_CATEGORIES:
+            trust_in[cat] += 1
         enriched.append({
             "detail": iss.get("detail", ""), "severity": sev, "url": iss.get("url", ""),
             "category": iss["category"], "cat": cat, "route": cls["route"],
@@ -102,10 +116,21 @@ def compute(issues: list[dict], measured: set | None = None, content_pages: int 
             continue
         effective = pen[key] / denom[key] if key in PER_PAGE else pen[key]
         score = max(0, round(100 - effective))
+        # Trust/critical caps: a category with fabricated or policy-violating
+        # signals can't score well no matter how clean the rest is.
+        if crit_in[key] >= 2:
+            score = min(score, 25)
+        elif crit_in[key] == 1 or trust_in[key]:
+            score = min(score, 40)
         cats.append({"key": key, "label": label, "score": score,
                      "grade": _grade(score), "weight": weight, "count": count[key]})
     total_w = sum(c["weight"] for c in cats) or 1.0
     overall = round(sum(c["score"] * c["weight"] for c in cats) / total_w)
+    # Overall trust cap: critical findings (fake phone, fake credentials,
+    # policy-violating schema) gate the whole site the way Google's quality
+    # systems — and every serious external auditor — treat them.
+    if total_criticals:
+        overall = min(overall, max(22, 60 - 9 * (total_criticals - 1)))
 
     # Prioritized fix plan: biggest impact first, least effort to break ties.
     ranked = sorted(enriched, key=lambda x: (-x["impact"], x["effort"]))

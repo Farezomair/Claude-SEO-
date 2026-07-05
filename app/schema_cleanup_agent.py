@@ -12,6 +12,8 @@ import json
 import re
 import threading
 
+from .crawler import LOCALBUSINESS_SUBTYPES
+
 from .database import SessionLocal
 from .elementor_agent import AbilitiesClient, read_body, write_body
 from .models import Finding, FixRecord, JobRun, RunLog, Site, SiteChange
@@ -54,8 +56,13 @@ def _bad_reason(inner: str) -> str | None:
         return "invalid JSON-LD"
     if _types(data) & DEPRECATED:
         return "deprecated schema (FAQPage/HowTo)"
+    types = _types(data)
+    if (types & LOCALBUSINESS_SUBTYPES) and '"aggregaterating"' in raw.lower():
+        return "self-serving review schema (Google policy risk)"
     if PLACEHOLDER_RE.search(raw):
         return "placeholder text in schema"
+    if re.search(r'"(servesCuisine|menu|acceptsReservations)"\s*:\s*null', raw):
+        return "template-leftover properties (null values)"
     return None
 
 
@@ -107,7 +114,8 @@ def run_schema_cleanup(site_id: int, run_id: int, conn: dict, page_id: int, page
         if ok:
             for f in db.query(Finding).filter(
                     Finding.site_id == site_id,
-                    Finding.category.in_(("schema_invalid", "schema_placeholder", "schema_deprecated")),
+                    Finding.category.in_(("schema_invalid", "schema_placeholder", "schema_deprecated",
+                                          "schema_selfserving_reviews", "schema_duplicate_entity")),
                     Finding.status.in_(("open", "in-progress"))).all():
                 f.status = "closed"
                 f.remark = f"Auto-fixed: removed {n} bad JSON-LD block(s) — {', '.join(sorted(set(reasons)))} (live)."

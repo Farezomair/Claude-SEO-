@@ -33,7 +33,8 @@ META_CATS = {"meta_title", "meta_description", "missing_title", "title_length", 
 # Findings that a full-page Elementor rewrite addresses (FAQ, quotable answers,
 # tables, deeper content, heading structure) — grounded in the EEAT+GEO knowledge.
 REWRITE_CATS = {"thin_content", "eeat_weak", "content_shallow", "content_stale",
-                "geo_unstructured", "heading_hierarchy", "missing_h1", "multiple_h1", "nap_missing"}
+                "geo_unstructured", "heading_hierarchy", "missing_h1", "multiple_h1", "nap_missing",
+                "heading_concat"}
 REQUIRED_KEYWORDS = ("privacy", "terms", "tos", "about", "contact", "accessibility")
 MAX_AUTO_FIXES = 25   # cap live auto-writes per run (each is a Claude call)
 MAX_REWRITES = 20     # cap full-page rewrites per run; a semaphore bounds concurrency
@@ -72,6 +73,9 @@ NO_CAP = {
     "schema_placeholder": "Schema contains placeholder text — needs manual review.",
     "missing_schema": "Use the homepage schema proposal (entity schema) — covered by the schema doer.",
     "orphan_page": "Linking an orphan page needs an internal-links doer (not built yet).",
+    "internal_redirect_links": "Rewriting every internal href to its final URL needs an href-rewrite doer (next on the roadmap).",
+    "junk_archives": "Noindexing tag/category/author archives needs a Yoast-settings ability in the Bridge (planned).",
+    "duplicate_post": "Consolidating republished duplicates needs your call on which version survives — then the Redirects Agent can 301 the rest.",
 }
 
 
@@ -533,7 +537,15 @@ HANDLERS = {
     "cwv_poor": _propose_performance,
     "image_legacy_format": _propose_webp,
     "keyword_targeting": _fix_meta,
+    "stale_year_title": _fix_meta,
     "low_internal_links": _propose_context_links,
+    "schema_selfserving_reviews": _propose_schema_cleanup,
+    "schema_duplicate_entity": _propose_schema_cleanup,
+    "fabricated_contact": _human_task,
+    "fabricated_credential": _human_task,
+    "schema_fake_address": _human_task,
+    "no_entity_corroboration": _human_task,
+    "stock_images_hotlinked": _human_task,
     "required_page_missing": _propose_required_page,
     "duplicate_title": _propose_dedupe,
     "striking_distance": _propose_ranking,
@@ -596,6 +608,8 @@ def dispatch_fixes(site_id: int, progress_run_id: int | None = None) -> dict:
         lookup_cats = META_CATS | REWRITE_CATS | {"duplicate_title", "striking_distance", "low_ctr",
                                                   "image_no_dimensions", "images_missing_alt", "cwv_poor",
                                                   "image_legacy_format", "keyword_targeting", "low_internal_links",
+                                                  "stale_year_title", "schema_selfserving_reviews",
+                                                  "schema_duplicate_entity",
                                                   "schema_invalid", "schema_placeholder", "schema_deprecated"}
         if any(f.category in lookup_cats for f in findings):
             try:

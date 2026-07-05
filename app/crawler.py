@@ -115,6 +115,21 @@ PHONE_RE = re.compile(r"\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}")
 # Imgix-style image CDNs where `auto=format` enables WebP/AVIF content negotiation.
 IMGIX_HOSTS = ("images.unsplash.com", "images.pexels.com")
 
+# ---- Trust layer (what real auditors check: truth, not just syntax) ----
+# 555-01XX is the fictional phone exchange reserved for film/TV — it cannot
+# receive calls. A business showing one fails every verification check.
+FAKE_PHONE_RE = re.compile(r"\(?\d{3}\)?[\s.\-]?555[\s.\-]?01\d{2}")
+# Placeholder credentials presented as real (sequential/zero digits).
+FAKE_LICENSE_RE = re.compile(
+    r"(?:lic(?:ense|ence)?\.?|registration)\s*(?:no\.?|number|#)?\s*[:#]?\s*[A-Z]{0,5}-?(?:12345\d*|00000\d*|1234)\b",
+    re.I)
+STOCK_HOSTS = ("images.unsplash.com", "images.pexels.com", "cdn.pixabay.com",
+               "img.freepik.com", "media.istockphoto.com")
+STALE_YEAR_RE = re.compile(r"\b(201\d|202[0-5])\b")
+CURRENT_YEAR = 2026
+# Crawler-extracted heading tokens glued together by span markup ("KitchenExperts").
+CONCAT_RE = re.compile(r"[a-z][A-Z][a-z]")
+
 
 def _legacy_format_src(src: str) -> bool:
     """True if this image src serves a legacy format a doer could modernize:
@@ -243,6 +258,8 @@ def crawl_site(start_url: str) -> dict:
     headers = {"User-Agent": USER_AGENT}
     with httpx.Client(follow_redirects=True, timeout=REQUEST_TIMEOUT, headers=headers) as client:
         max_pages = _max_crawl_pages()
+        trust_reported: set = set()
+        int_links = {"checked": 0, "redirected": 0, "example": ""}
         while queue and pages_crawled < max_pages:
             page_url = queue.pop(0)
             if page_url in visited:
@@ -359,6 +376,10 @@ def crawl_site(start_url: str) -> dict:
                 elif len(title) < 25:
                     issues.append(_issue("title_length", "low", page_url,
                                          f"Title is short ({len(title)} chars) — wasted SERP space"))
+                yr = STALE_YEAR_RE.search(title)
+                if yr and int(yr.group(1)) < CURRENT_YEAR:
+                    issues.append(_issue("stale_year_title", "low", page_url,
+                                         f"Title still says {yr.group(1)} — stale-dated content loses clicks and trust"))
             # Heading hierarchy: flag a skipped level (e.g. H2 -> H4). This is
             # template-wide on builder sites, so count pages and report ONCE below.
             levels = [int(h.name[1]) for h in soup.find_all(re.compile(r"^h[1-6]$"))]
@@ -371,6 +392,15 @@ def crawl_site(start_url: str) -> dict:
                         heading_skip["detail"] = f"Heading levels skip from H{prev} to H{lvl}"
                     break
                 prev = lvl
+            if "heading_concat" not in trust_reported:
+                for h in soup.find_all(re.compile(r"^h[1-3]$")):
+                    txt = h.get_text("", strip=True)
+                    if CONCAT_RE.search(txt):
+                        trust_reported.add("heading_concat")
+                        issues.append(_issue("heading_concat", "medium", page_url,
+                                             f"Headings render with glued words (e.g. “{txt[:60]}”) — the theme's "
+                                             "line-break markup drops the space, so crawlers can't parse the keywords"))
+                        break
 
             # --- thin content (SEO Auditor group C) ---
             path = urlparse(page_url).path.lower()
@@ -381,6 +411,7 @@ def crawl_site(start_url: str) -> dict:
                                          f"Thin content: about {word_count} words for this page"))
 
             # --- schema validity (SEO Auditor group F; template-wide dedup) ---
+            lb_count = {"n": 0}
             ld_scripts = soup.find_all("script", attrs={"type": re.compile(r"ld\+json", re.I)})
             if not ld_scripts and page_url == home_norm:
                 issues.append(_issue("missing_schema", "low", page_url,
@@ -413,11 +444,71 @@ def crawl_site(start_url: str) -> dict:
                         schema_reported.add("schema_deprecated")
                         issues.append(_issue("schema_deprecated", "low", page_url,
                                              f"Structured data uses a deprecated/restricted type: {', '.join(sorted(bad))}"))
+                # Guideline compliance — what Google actually enforces:
+                ptypes = _schema_types(parsed)
+                is_business = bool(ptypes & LOCALBUSINESS_SUBTYPES)
+                if is_business:
+                    lb_count["n"] += 1
+                if ("schema_selfserving_reviews" not in trust_reported and is_business
+                        and '"aggregaterating"' in raw.lower()):
+                    trust_reported.add("schema_selfserving_reviews")
+                    issues.append(_issue("schema_selfserving_reviews", "critical", page_url,
+                                         "LocalBusiness schema injects its own aggregateRating (self-serving reviews) — "
+                                         "ineligible per Google's review-snippet guidelines and a documented manual-action "
+                                         "trigger"))
+                if "schema_fake_address" not in trust_reported:
+                    for m in re.finditer(r'"streetAddress"\s*:\s*"([^"]*)"', raw):
+                        addr = m.group(1).strip()
+                        if addr and (not re.search(r"\d", addr) or len(addr.split()) < 2):
+                            trust_reported.add("schema_fake_address")
+                            issues.append(_issue("schema_fake_address", "critical", page_url,
+                                                 f"Schema streetAddress is “{addr}” — not a real street address. Without a "
+                                                 "verifiable address there is no Google Business Profile, no citations, no "
+                                                 "map-pack presence"))
+                            break
+                if ("no_entity_corroboration" not in trust_reported and is_business
+                        and re.search(r'"sameAs"\s*:\s*\[\s*\]', raw)):
+                    trust_reported.add("no_entity_corroboration")
+                    issues.append(_issue("no_entity_corroboration", "medium", page_url,
+                                         "Schema sameAs is empty — no Google Business Profile, directories, or social "
+                                         "profiles corroborate the business entity anywhere"))
+
+            if lb_count["n"] >= 2 and "schema_duplicate_entity" not in trust_reported:
+                trust_reported.add("schema_duplicate_entity")
+                issues.append(_issue("schema_duplicate_entity", "medium", page_url,
+                                     f"{lb_count['n']} separate LocalBusiness schema entities on one page (not linked by "
+                                     "@id) — conflicting signals about what the business is"))
 
             # --- security: mixed content on HTTPS pages ---
             if page_url.startswith("https://") and MIXED_CONTENT_RE.search(resp.text):
                 issues.append(_issue("mixed_content", "medium", page_url,
                                      "Page loads some assets over insecure HTTP (mixed content)"))
+
+            # --- trust layer: fabricated data is a ranking killer, not a detail ---
+            if "fabricated_contact" not in trust_reported:
+                fp = FAKE_PHONE_RE.search(soup.get_text(" ", strip=True))
+                if fp:
+                    trust_reported.add("fabricated_contact")
+                    issues.append(_issue("fabricated_contact", "critical", page_url,
+                                         f"Phone number {fp.group(0)} uses the fictional 555-01XX exchange — it cannot "
+                                         "receive calls. A fake phone fails Google's business verification, kills local "
+                                         "rankings, and loses every caller"))
+            if "fabricated_credential" not in trust_reported:
+                fl = FAKE_LICENSE_RE.search(soup.get_text(" ", strip=True))
+                if fl:
+                    trust_reported.add("fabricated_credential")
+                    issues.append(_issue("fabricated_credential", "critical", page_url,
+                                         f"Credential looks like a placeholder ({fl.group(0).strip()}) — presenting a "
+                                         "fake license number is a legal and trust liability"))
+            if "stock_images_hotlinked" not in trust_reported:
+                stock = [i.get("src", "") for i in imgs
+                         if any(h in (i.get("src") or "") for h in STOCK_HOSTS)]
+                if len(stock) >= 3:
+                    trust_reported.add("stock_images_hotlinked")
+                    issues.append(_issue("stock_images_hotlinked", "high", page_url,
+                                         f"{len(stock)} images are hotlinked stock photos (Unsplash/Pexels) presented as "
+                                         "the business's work — Google and visitors can tell; real project photos are a "
+                                         "core local ranking signal"))
 
             # --- link discovery + checks ---
             for anchor in soup.find_all("a", href=True):
@@ -445,6 +536,12 @@ def crawl_site(start_url: str) -> dict:
                         if r.status_code >= 400:
                             r = client.get(link)
                         status = r.status_code
+                        if internal:
+                            int_links["checked"] += 1
+                            if r.history:
+                                int_links["redirected"] += 1
+                                if not int_links["example"]:
+                                    int_links["example"] = link
                     except Exception:
                         status = None
                     checked_links[link] = status
@@ -511,6 +608,29 @@ def crawl_site(start_url: str) -> dict:
             for u in orphans[:5]:
                 issues.append(_issue("orphan_page", "low", u,
                                      "Page is in the sitemap but not linked from any other page"))
+
+        # thin archive pages declared indexable via the sitemap (tag/category/author)
+        archives = [u for u in internal_sitemap if re.search(r"/(tag|category|author)/", u)]
+        if len(archives) >= 5:
+            issues.append(_issue("junk_archives", "medium", origin,
+                                 f"{len(archives)} tag/category/author archive pages are in the sitemap — thin "
+                                 f"auto-generated pages that dilute crawl budget (e.g. {archives[0]})"))
+
+        # republished duplicates: /post-2/, /post-3/ slugs whose base post also exists
+        sm_paths = {urlparse(u).path.rstrip("/") for u in internal_sitemap}
+        dupes = [p for p in sm_paths
+                 if re.search(r"-\d$", p) and re.sub(r"-\d$", "", p) in sm_paths]
+        for p in sorted(dupes)[:3]:
+            issues.append(_issue("duplicate_post", "medium", origin + p,
+                                 f"Republished duplicate: {p} duplicates {re.sub(r'-\d$', '', p)} — the copies "
+                                 "compete against each other (cannibalization); consolidate with a 301"))
+
+        # internal links that all pass through 301 redirects (PageRank through hops)
+        if int_links["checked"] >= 8 and int_links["redirected"] / int_links["checked"] >= 0.5:
+            issues.append(_issue("internal_redirect_links", "medium", origin,
+                                 f"{int_links['redirected']} of {int_links['checked']} internal links pass through a "
+                                 f"301 redirect (e.g. {int_links['example']}) — every internal PageRank flow takes a "
+                                 "detour; hrefs should point at the final URL"))
 
         # required pages (via discovered internal links)
         # Present only if the page actually loads (200). A required page that is

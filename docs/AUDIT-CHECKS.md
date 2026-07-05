@@ -4,7 +4,7 @@ Single source of truth for how many things Ascend audits and what each check is.
 Keep this updated whenever an auditor/check is added or changed. Pairs with
 `DOERS.md` (the fix side).
 
-**Audit check count (active): 44** across 5 auditors.
+**Audit check count (active): 56** across 5 auditors (incl. the 12-check TRUST LAYER).
 _Last updated: 2026-07-01._
 
 Auditors (pipeline in `jobs._run_audit`):
@@ -15,6 +15,26 @@ Auditors (pipeline in `jobs._run_audit`):
 - **Performance** (`perf.py`, scored only when it runs) — 1
 
 Lane = how the matching doer acts: 🟢 auto · 🔵 approval · 🟡 owner-only · ⚪ no doer yet.
+
+## Trust layer — 12 checks (added after calibrating against an external expert audit)
+What real auditors grade hardest: truth, not syntax. CRITICAL trust findings CAP
+the category (1 critical → ≤40, 2+ → ≤25) and the OVERALL score
+(max(22, 60 − 9·(criticals−1))) — so fabricated data craters the grade the way
+Google's quality systems treat it.
+| Check | Detects | Sev | Handled by |
+|---|---|---|---|
+| `fabricated_contact` | fictional 555-01XX phone site-wide | critical | 🟡 Owner |
+| `fabricated_credential` | placeholder license/registration number | critical | 🟡 Owner |
+| `schema_selfserving_reviews` | LocalBusiness injecting its own aggregateRating (manual-action risk) | critical | 🟢 Schema-cleanup (removes the block) |
+| `schema_fake_address` | schema streetAddress isn't a real street address | critical | 🟡 Owner |
+| `no_entity_corroboration` | empty sameAs — no GBP/directories/socials | med | 🟡 Owner |
+| `schema_duplicate_entity` | 2+ unlinked LocalBusiness entities on a page | med | 🟢 Schema-cleanup |
+| `stock_images_hotlinked` | hotlinked stock photos presented as the business's work | high | 🟡 Owner (real photos) |
+| `internal_redirect_links` | ≥50% of internal links pass through 301s | med | ⚪ href-rewrite doer (planned) |
+| `junk_archives` | tag/category/author archives in the sitemap | med | ⚪ Yoast-settings Bridge ability (planned) |
+| `stale_year_title` | title still says 2019–2025 | low | 🟢 Meta |
+| `heading_concat` | headings render with glued words (theme markup bug) | med | 🟢 Rewrite |
+| `duplicate_post` | /post-2, /post-3 republished duplicates (cannibalization) | med | 🟡 Owner picks survivor → Redirects 301s |
 
 ## Technical — 12 checks
 | Check (category) | Detects | Sev | Source | Handled by |
@@ -101,4 +121,4 @@ yet — they light up when the matching auditor logic is added:
 Note: some categories bundle multiple sub-checks (`indexation` = noindex +
 robots.txt + sitemap; `structure` = header + footer; `broken_link` = internal +
 external at several severities), so the literal number of probes run per page is
-higher than 44 — but 44 is the count of distinct routable/scored check-types.
+higher than 56 — but 56 is the count of distinct routable/scored check-types.
