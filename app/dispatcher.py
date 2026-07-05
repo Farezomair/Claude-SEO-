@@ -73,7 +73,8 @@ NO_CAP = {
     "schema_placeholder": "Schema contains placeholder text — needs manual review.",
     "missing_schema": "Use the homepage schema proposal (entity schema) — covered by the schema doer.",
     "orphan_page": "Linking an orphan page needs an internal-links doer (not built yet).",
-    "internal_redirect_links": "Rewriting every internal href to its final URL needs an href-rewrite doer (next on the roadmap).",
+    "cannibalization": "Several posts chase the same query \u2014 pick the survivor and the Redirects Agent can 301 the rest; merging the copy needs your call.",
+    "duplicate_block": "The theme renders this block twice \u2014 a template-level fix; flagged for your review.",
     "junk_archives": "Noindexing tag/category/author archives needs a Yoast-settings ability in the Bridge (planned).",
     "duplicate_post": "Consolidating republished duplicates needs your call on which version survives — then the Redirects Agent can 301 the rest.",
 }
@@ -131,6 +132,19 @@ def _fix_meta(db, ctx, f):
     except WordPressError as exc:
         return ("escalated", f"WordPress rejected the write: {exc}", False)
     ok = all((live.get(k) or "").strip() == v.strip() for k, v in meta.items())
+    # The stored meta can be overridden by the theme's own <head> — verify the
+    # RENDERED title too, so we never claim a fix the theme swallowed.
+    if ok and YOAST_TITLE_KEY in meta:
+        from .meta_audit import rendered_title
+        live_title = rendered_title(item["link"])
+        if live_title and meta[YOAST_TITLE_KEY].strip().lower() not in live_title:
+            ctx["flush"] = True
+            _fixrecord(db, ctx, f, "SEO Technical",
+                       "Wrote the SEO title, but the theme's own <head> overrides it on the live page",
+                       after=meta[YOAST_TITLE_KEY][:200], verified=False, method="auto-safe")
+            return ("escalated",
+                    "Title saved to the SEO plugin, but the THEME overrides it on the live page "
+                    f"(rendered: \u201c{live_title[:60]}\u201d) \u2014 the theme's title source needs fixing.", False)
     ctx["flush"] = True
     ctx["auto_used"] += 1
     _fixrecord(db, ctx, f, "SEO Technical", "Set meta: " + "; ".join(parts),
@@ -459,6 +473,22 @@ def _propose_schema_cleanup(db, ctx, f):
             "Removing broken/placeholder/deprecated structured data from the live page (verified).", False)
 
 
+def _propose_href_rewrite(db, ctx, f):
+    """Rewrite internal hrefs to their final URLs (fires once per run)."""
+    if ctx.get("hrefs_done"):
+        return ("in-progress", "Covered by the href rewrite running this run.", False)
+    from .href_agent import start_href_rewrite_async
+    hj = JobRun(site_id=ctx["site"].id, kind="hrefs", status="running",
+                summary="Pointing internal links at their final URLs\u2026")
+    db.add(hj)
+    db.commit()
+    db.refresh(hj)
+    start_href_rewrite_async(ctx["site"].id, hj.id, ctx["conn"])
+    ctx["hrefs_done"] = True
+    return ("in-progress",
+            "Rewriting internal links to skip the 301 detours (verified on the live homepage).", False)
+
+
 def _propose_context_links(db, ctx, f):
     """Add contextual in-body links to related pages (query-aware anchors)."""
     item = (ctx.get("items") or {}).get(_norm(f.evidence_url))
@@ -538,6 +568,8 @@ HANDLERS = {
     "image_legacy_format": _propose_webp,
     "keyword_targeting": _fix_meta,
     "stale_year_title": _fix_meta,
+    "title_conflict": _fix_meta,
+    "internal_redirect_links": _propose_href_rewrite,
     "low_internal_links": _propose_context_links,
     "schema_selfserving_reviews": _propose_schema_cleanup,
     "schema_duplicate_entity": _propose_schema_cleanup,
@@ -609,7 +641,7 @@ def dispatch_fixes(site_id: int, progress_run_id: int | None = None) -> dict:
                                                   "image_no_dimensions", "images_missing_alt", "cwv_poor",
                                                   "image_legacy_format", "keyword_targeting", "low_internal_links",
                                                   "stale_year_title", "schema_selfserving_reviews",
-                                                  "schema_duplicate_entity",
+                                                  "schema_duplicate_entity", "title_conflict",
                                                   "schema_invalid", "schema_placeholder", "schema_deprecated"}
         if any(f.category in lookup_cats for f in findings):
             try:

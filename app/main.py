@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "trust-layer-62"
+BUILD = "precision-batch-63"
 
 
 @app.get("/version")
@@ -315,7 +315,8 @@ def _pipeline_state(run, report_id=None) -> dict:
 
 
 _DOER_JOB_KINDS = ["elementor", "image", "alttext", "schema", "schemaclean", "technical",
-                   "headmeta", "robots", "perf", "webp", "linking", "ctxlinks", "redirects", "pagedraft"]
+                   "headmeta", "robots", "perf", "webp", "linking", "ctxlinks", "redirects", "hrefs",
+                   "pagedraft"]
 _STATE_PRIORITY = {"active": 3, "failed": 2, "done": 1, "pending": 0}
 # Doer runs execute on in-process daemon threads, so any JobRun still 'running'
 # from BEFORE this process booted is a ghost (a redeploy killed its thread) — the
@@ -1314,6 +1315,32 @@ def run_context_links_now(site_id: int, request: Request, db: Session = Depends(
         db.commit()
         db.refresh(run)
         start_context_links_async(site_id, run.id, conn, pid, links.get(pid, ""), p.get("title", ""))
+    return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
+
+
+@app.post("/sites/{site_id}/run-hrefs")
+def run_hrefs_now(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """Href-rewrite doer: point every internal link at its final URL (no 301
+    detours), verified against the live homepage."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return RedirectResponse(f"/sites/{site_id}?tab=settings&notice=test_none", status_code=303)
+    already = (db.query(JobRun)
+               .filter(JobRun.site_id == site_id, JobRun.kind == "hrefs", JobRun.status == "running")
+               .first())
+    if not already:
+        run = JobRun(site_id=site_id, kind="hrefs", status="running",
+                     summary="Pointing internal links at their final URLs\u2026")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        from .href_agent import start_href_rewrite_async
+        start_href_rewrite_async(site_id, run.id, conn)
     return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
 
 

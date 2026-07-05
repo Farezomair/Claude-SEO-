@@ -4,7 +4,7 @@ Single source of truth for how many things Ascend audits and what each check is.
 Keep this updated whenever an auditor/check is added or changed. Pairs with
 `DOERS.md` (the fix side).
 
-**Audit check count (active): 56** across 5 auditors (incl. the 12-check TRUST LAYER).
+**Audit check count (active): 59** across 6 auditors (incl. the trust layer + precision batch: title_conflict, cannibalization clusters, duplicate_block).
 _Last updated: 2026-07-01._
 
 Auditors (pipeline in `jobs._run_audit`):
@@ -30,7 +30,7 @@ Google's quality systems treat it.
 | `no_entity_corroboration` | empty sameAs — no GBP/directories/socials | med | 🟡 Owner |
 | `schema_duplicate_entity` | 2+ unlinked LocalBusiness entities on a page | med | 🟢 Schema-cleanup |
 | `stock_images_hotlinked` | hotlinked stock photos presented as the business's work | high | 🟡 Owner (real photos) |
-| `internal_redirect_links` | ≥50% of internal links pass through 301s | med | ⚪ href-rewrite doer (planned) |
+| `internal_redirect_links` | ≥50% of internal links pass through 301s | med | 🟢 Redirects (href rewrite, verified on the live homepage) |
 | `junk_archives` | tag/category/author archives in the sitemap | med | ⚪ Yoast-settings Bridge ability (planned) |
 | `stale_year_title` | title still says 2019–2025 | low | 🟢 Meta |
 | `heading_concat` | headings render with glued words (theme markup bug) | med | 🟢 Rewrite |

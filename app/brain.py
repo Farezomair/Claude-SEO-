@@ -515,6 +515,8 @@ Judge against this expert standard:
 
 Use category "needs_real_data" when the fix requires a real-world fact only the business owner can supply and that you must NOT invent — e.g. a real phone number, license/registration number, physical address, actual prices, certifications, or real dates/years. Describe exactly what the owner should add.
 
+Also use "needs_real_data" for TRUST CLAIMS that are unverifiable or internally inconsistent — e.g. review counts with no visible third-party source, project counts with no portfolio, or contradictions like "since 2012" alongside "12+ years" when the years don't add up. Quote the exact claim and say what evidence the owner must supply (or that the claim should be removed).
+
 Respond with ONLY a JSON object, no preamble:
 {{"content_score": 0-100, "geo_score": 0-100, "findings": [{{"category": "eeat_weak|content_shallow|content_stale|geo_unstructured|needs_real_data", "severity": "low|medium|high", "detail": "specific, actionable observation about THIS page"}}]}}
 At most 4 findings. Only include REAL problems (omit findings if the page is strong)."""

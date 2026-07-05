@@ -56,6 +56,11 @@ def _run_audit(site_id: int, audit_id: int, start_url: str) -> None:
         except Exception:
             pass
         try:
+            from .meta_audit import title_conflict_findings
+            all_issues += title_conflict_findings(site_id, start_url)
+        except Exception:
+            pass
+        try:
             perf_issues, perf_ok = analyze_performance(start_url)
             all_issues += perf_issues
             if perf_ok:

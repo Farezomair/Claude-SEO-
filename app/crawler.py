@@ -473,6 +473,19 @@ def crawl_site(start_url: str) -> dict:
                                          "Schema sameAs is empty — no Google Business Profile, directories, or social "
                                          "profiles corroborate the business entity anywhere"))
 
+            if "duplicate_block" not in trust_reported:
+                block_texts = {}
+                for el in soup.find_all(["h2", "h3", "li"]):
+                    t = re.sub(r"\s+", " ", el.get_text(" ", strip=True))
+                    if 25 <= len(t) <= 200:
+                        block_texts[t] = block_texts.get(t, 0) + 1
+                dupb = [t for t, n in block_texts.items() if n >= 2]
+                if len(dupb) >= 3:
+                    trust_reported.add("duplicate_block")
+                    issues.append(_issue("duplicate_block", "medium", page_url,
+                                         f"{len(dupb)} content blocks render twice on the page (e.g. "
+                                         f"\u201c{dupb[0][:50]}\u201d) \u2014 a template bug that duplicates copy"))
+
             if lb_count["n"] >= 2 and "schema_duplicate_entity" not in trust_reported:
                 trust_reported.add("schema_duplicate_entity")
                 issues.append(_issue("schema_duplicate_entity", "medium", page_url,
@@ -659,6 +672,14 @@ def crawl_site(start_url: str) -> dict:
             if missing_social:
                 issues.append(_issue("og_incomplete", "low", origin,
                                      "Missing social/preview tags: " + ", ".join(missing_social)))
+            ogimg = home_soup.find("meta", attrs={"property": "og:image"})
+            ogsrc = (ogimg.get("content") or "") if ogimg else ""
+            if ogsrc and "stock_images_hotlinked" not in trust_reported and re.search(
+                    r"pexels-photo|unsplash|pixabay|istockphoto|freepik", ogsrc, re.I):
+                trust_reported.add("stock_images_hotlinked")
+                issues.append(_issue("stock_images_hotlinked", "high", origin,
+                                     f"The social-preview image (og:image) is a stock photo \u2014 the filename "
+                                     f"still carries the stock ID ({ogsrc.rsplit('/', 1)[-1][:60]})"))
 
         # security headers (homepage)
         if homepage_headers:
@@ -674,6 +695,17 @@ def crawl_site(start_url: str) -> dict:
             if str(http_resp.url).startswith("http://"):
                 issues.append(_issue("no_https", "high", origin,
                                      "Site does not redirect HTTP to HTTPS"))
+        except Exception:
+            pass
+
+        # www-variant entry: should collapse to the canonical host in ONE hop
+        try:
+            bare = urlparse(start_url).netloc.removeprefix("www.")
+            wr = client.get("http://www." + bare)
+            if len(wr.history) >= 2:
+                issues.append(_issue("redirect_issue", "low", "http://www." + bare,
+                                     f"www entry takes {len(wr.history)} redirect hops to reach the canonical "
+                                     "URL \u2014 collapse to a single hop at the server"))
         except Exception:
             pass
 
@@ -724,6 +756,34 @@ def crawl_site(start_url: str) -> dict:
             if len(urls) > 1:
                 issues.append(_issue("duplicate_title", "medium", urls[0],
                                      f"Title \"{t[:60]}\" is duplicated on {len(urls)} pages"))
+
+        # cannibalization: DIFFERENT pages whose titles chase the same query
+        # (high token overlap after dropping brand/stopwords/years)
+        stop = {"the", "and", "for", "your", "with", "what", "how", "much", "does",
+                "cost", "guide", "tips", "2024", "2025", "2026", "idaho", "meridian"}
+        tokset = {}
+        for url, t in titles.items():
+            toks = frozenset(w for w in re.findall(r"[a-z]{4,}", (t or "").lower()) if w not in stop)
+            if len(toks) >= 3:
+                tokset[url] = toks
+        clustered: set = set()
+        cl_urls = sorted(tokset)
+        for i, u1 in enumerate(cl_urls):
+            if u1 in clustered:
+                continue
+            group = [u1]
+            for u2 in cl_urls[i + 1:]:
+                if u2 in clustered:
+                    continue
+                a, b = tokset[u1], tokset[u2]
+                if len(a & b) / max(1, len(a | b)) >= 0.6:
+                    group.append(u2)
+            if len(group) >= 3:
+                clustered.update(group)
+                issues.append(_issue("cannibalization", "medium", group[0],
+                                     f"{len(group)} pages target the same query cluster (near-identical title "
+                                     f"topics) \u2014 they compete against each other; consolidate or "
+                                     f"differentiate (e.g. {', '.join(urlparse(g).path for g in group[:3])})"))
 
     stats = {"pages_crawled": pages_crawled, "links_checked": links_checked, "issues_found": len(issues)}
     return {"issues": issues, "stats": stats}

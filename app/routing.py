@@ -70,6 +70,9 @@ _TABLE = {
     "stale_year_title": ("meta", "SEO Technical", "auto-safe"),
     "heading_concat": ("on-page", "Website Agent", "needs-approval"),
     "duplicate_post": ("content", "Content Corrector", "needs-approval"),
+    "title_conflict": ("meta", "SEO Technical", "needs-approval"),
+    "cannibalization": ("content", "Content Corrector", "needs-approval"),
+    "duplicate_block": ("on-page", "Website Agent", "needs-approval"),
     # Images (group D)
     "image_no_dimensions": ("images", "Website Agent", "needs-approval"),
     "image_legacy_format": ("images", "Website Agent", "needs-approval"),
