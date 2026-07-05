@@ -102,12 +102,15 @@ def _fix_meta(db, ctx, f):
         return ("open", "Couldn't match this URL to a WordPress page to edit its meta.", False)
     if ctx["auto_used"] >= MAX_AUTO_FIXES:
         return ("open", "Queued — per-run fix cap reached; will continue next run.", False)
+    from .keyword_brain import keyword_for
+    target_kw = keyword_for(db, ctx["site"].id, item["link"])
     try:
-        sugg = generate_meta(item["title"], item["link"], item["content_text"], ctx["site"].name)
+        sugg = generate_meta(item["title"], item["link"], item["content_text"], ctx["site"].name,
+                             target_keyword=target_kw)
     except Exception as exc:
         return ("escalated", f"Meta generation failed ({exc.__class__.__name__}).", False)
 
-    want_title = f.category in ("meta_title", "missing_title", "title_length")
+    want_title = f.category in ("meta_title", "missing_title", "title_length", "keyword_targeting")
     want_desc = f.category in ("meta_description", "meta_description_missing")
     meta, parts = {}, []
     if (want_title or not (want_title or want_desc)) and sugg.get("title"):
@@ -238,8 +241,10 @@ def _propose_ranking(db, ctx, f):
         return ("in-progress", "A ranking rewrite for this page is already in Approvals.", False)
     cur_title = (item["meta"].get(YOAST_TITLE_KEY) or item.get("title") or "").strip()
     cur_desc = (item["meta"].get(YOAST_DESC_KEY) or "").strip()
+    from .keyword_brain import keyword_for
     try:
         sugg = improve_meta(item["title"], item["link"], item["content_text"], cur_title, cur_desc,
+                            target_query=keyword_for(db, ctx["site"].id, item["link"]),
                             site_name=ctx["site"].name)
     except Exception as exc:
         return ("escalated", f"Rewrite generation failed ({exc.__class__.__name__}).", False)
@@ -322,7 +327,9 @@ def _propose_rewrite(db, ctx, f):
     db.add(sub)
     db.commit()
     db.refresh(sub)
-    start_page_rewrite_async(ctx["site"].id, sub.id, ctx["conn"], pid, title)  # background — don't block the bar
+    from .keyword_brain import keyword_for as _kwf
+    start_page_rewrite_async(ctx["site"].id, sub.id, ctx["conn"], pid, title,
+                             _kwf(db, ctx["site"].id, item["link"]))  # background — don't block the bar
     ctx["rewrite_pages"].add(pid)
     ctx["rewrites_used"] += 1
     return ("in-progress",
@@ -448,6 +455,23 @@ def _propose_schema_cleanup(db, ctx, f):
             "Removing broken/placeholder/deprecated structured data from the live page (verified).", False)
 
 
+def _propose_context_links(db, ctx, f):
+    """Add contextual in-body links to related pages (query-aware anchors)."""
+    item = (ctx.get("items") or {}).get(_norm(f.evidence_url))
+    if not item:
+        return ("no-capability", "Couldn't match this page to add internal links.", False)
+    pid, title = item["id"], item.get("title", "")
+    from .context_link_agent import start_context_links_async
+    sub = JobRun(site_id=ctx["site"].id, kind="ctxlinks", status="running",
+                 summary=f"Linking {title or pid} into the site…")
+    db.add(sub)
+    db.commit()
+    db.refresh(sub)
+    start_context_links_async(ctx["site"].id, sub.id, ctx["conn"], pid, item.get("link", ""), title)
+    return ("in-progress",
+            "Adding contextual in-body links to related pages (natural anchors, verified live).", False)
+
+
 def _propose_webp(db, ctx, f):
     """Serve the page's images as WebP/AVIF (CDN auto=format or convert+rehost)."""
     item = (ctx.get("items") or {}).get(_norm(f.evidence_url))
@@ -508,6 +532,8 @@ HANDLERS = {
     "ai_crawler_blocked": _propose_robots,
     "cwv_poor": _propose_performance,
     "image_legacy_format": _propose_webp,
+    "keyword_targeting": _fix_meta,
+    "low_internal_links": _propose_context_links,
     "required_page_missing": _propose_required_page,
     "duplicate_title": _propose_dedupe,
     "striking_distance": _propose_ranking,
@@ -569,7 +595,7 @@ def dispatch_fixes(site_id: int, progress_run_id: int | None = None) -> dict:
         # Build the URL->page map once if any finding needs a page lookup.
         lookup_cats = META_CATS | REWRITE_CATS | {"duplicate_title", "striking_distance", "low_ctr",
                                                   "image_no_dimensions", "images_missing_alt", "cwv_poor",
-                                                  "image_legacy_format",
+                                                  "image_legacy_format", "keyword_targeting", "low_internal_links",
                                                   "schema_invalid", "schema_placeholder", "schema_deprecated"}
         if any(f.category in lookup_cats for f in findings):
             try:

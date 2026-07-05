@@ -149,6 +149,42 @@
   </details>
   {% endif %}
 
+  <!-- Strategy — the keyword map (expandable) -->
+  <details class="cc-panel">
+    <summary><h2>Strategy — keyword targets</h2>{% if keyword_targets %}<span class="pill-count" style="margin-left:6px;">{{ keyword_targets|length }}</span>{% endif %}</summary>
+    <div class="panel-body">
+      <p class="muted" style="margin-top:0; font-size:13px;">
+        What each page should rank for — chosen from your business profile and real Search Console demand.
+        Every agent writes toward these targets (titles, rewrites, internal-link anchors).
+      </p>
+      <form method="post" action="/sites/{{ site.id }}/build-keywords" style="margin-bottom:14px;">
+        <button class="btn secondary small" type="submit" {{ 'disabled' if keywords_running else '' }}>
+          {{ 'Strategist working…' if keywords_running else ('Rebuild keyword map' if keyword_targets else '🧠 Build keyword map') }}
+        </button>
+      </form>
+      {% if keyword_targets %}
+      <div class="card" style="padding:0; margin:0;">
+        <table>
+          <thead><tr><th>Page</th><th>Target query</th><th>Intent</th><th>Why</th></tr></thead>
+          <tbody>
+            {% for t in keyword_targets %}
+            <tr>
+              <td style="white-space:nowrap;">{{ t.page_path }}</td>
+              <td style="font-weight:600;">{{ t.primary_kw }}
+                {% if t.source == 'ai+gsc' %}<span class="badge badge-success" style="margin-left:6px;">real demand</span>{% endif %}</td>
+              <td>{{ t.intent }}</td>
+              <td class="muted" style="font-size:12.5px;">{{ t.rationale }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty">No keyword map yet — build it and the whole crew becomes query-aware.</div>
+      {% endif %}
+    </div>
+  </details>
+
   <!-- Approvals (expandable) -->
   <details class="cc-panel" id="approvals-panel" {{ 'open' if (human_tasks or approval_items) else '' }}>
     <summary><h2>Approvals</h2>{% if approval_items %}<span class="pill-count" style="margin-left:6px;">{{ approval_items|length }}</span>{% endif %}{% if human_tasks %}<span class="muted" style="font-size:12px; margin-left:8px;">{{ human_tasks|length }} need you</span>{% endif %}</summary>

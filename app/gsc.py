@@ -98,3 +98,33 @@ def gsc_findings(site_url: str) -> list[dict]:
     # Most valuable first, capped.
     issues.sort(key=lambda i: 0 if i["category"] == "striking_distance" else 1)
     return issues[:20]
+
+
+def queries_by_page(site_url: str, days: int = 90, top_n: int = 6) -> dict:
+    """Real Search Console demand per page: {path: [{query, clicks, impressions,
+    position}, ...]} (top queries by impressions). {} when GSC isn't connected."""
+    token = get_access_token()
+    if not token:
+        return {}
+    prop = match_property(token, site_url)
+    if not prop:
+        return {}
+    out: dict = {}
+    try:
+        for row in search_analytics(token, prop, days=days, dimensions=("page", "query")):
+            keys = row.get("keys") or []
+            if len(keys) < 2:
+                continue
+            from urllib.parse import urlparse
+            path = (urlparse(keys[0]).path or "/").rstrip("/") or "/"
+            out.setdefault(path, []).append({
+                "query": keys[1],
+                "clicks": int(row.get("clicks", 0)),
+                "impressions": int(row.get("impressions", 0)),
+                "position": round(float(row.get("position", 0)), 1),
+            })
+    except Exception:
+        return {}
+    for path in out:
+        out[path] = sorted(out[path], key=lambda r: -r["impressions"])[:top_n]
+    return out

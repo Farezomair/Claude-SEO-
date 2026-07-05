@@ -56,6 +56,7 @@ _TABLE = {
     "title_length": ("meta", "SEO Technical", "auto-safe"),
     "heading_hierarchy": ("on-page", "SEO On-page", "needs-approval"),
     "low_internal_links": ("on-page", "SEO On-page", "needs-approval"),
+    "keyword_targeting": ("meta", "SEO Technical", "auto-safe"),
     # Images (group D)
     "image_no_dimensions": ("images", "Website Agent", "needs-approval"),
     "image_legacy_format": ("images", "Website Agent", "needs-approval"),

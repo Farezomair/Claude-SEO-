@@ -74,8 +74,10 @@ def _amend_block(instructions: str) -> str:
 
 
 def generate_meta(page_title: str, page_url: str, content_excerpt: str,
-                  site_name: str = "", rules: str = "", instructions: str = "") -> dict:
-    """Return {"title": str, "description": str} for a page."""
+                  site_name: str = "", rules: str = "", instructions: str = "",
+                  target_keyword: str = "") -> dict:
+    """Return {"title": str, "description": str} for a page. When the Keyword
+    Brain has mapped a target query for this page, the copy is written to win it."""
     prompt = f"""You are an expert SEO copywriter. Write an SEO meta title and meta description for this web page.{_rules_block(rules)}{_amend_block(instructions)}
 
 {META_GUIDE}
@@ -83,6 +85,7 @@ def generate_meta(page_title: str, page_url: str, content_excerpt: str,
 Site name: {site_name or "(unknown)"}
 Page URL: {page_url}
 Page heading / current title: {page_title}
+{f'TARGET QUERY: this page is meant to rank for "{target_keyword}" — lead the title with it (naturally, no stuffing) and speak to that search intent in the description.' if target_keyword else ''}
 
 Page content excerpt:
 \"\"\"
@@ -423,7 +426,8 @@ def _strip_fences(text: str) -> str:
 
 
 def rewrite_page_html(site_name: str, page_url: str, page_title: str,
-                      current_html: str, rules: str = "", instructions: str = "") -> dict:
+                      current_html: str, rules: str = "", instructions: str = "",
+                      target_keyword: str = "") -> dict:
     """Full-page SEO rewrite of a single Elementor HTML-widget page body.
 
     These pages are one self-contained HTML document (fonts, <style>, nav, hero,
@@ -436,6 +440,7 @@ def rewrite_page_html(site_name: str, page_url: str, page_title: str,
 
 Business: {site_name}
 Page: {page_title} ({page_url})
+{f'TARGET QUERY: this page is meant to rank for "{target_keyword}". Work it (and close variants) naturally into the <h1>, at least one <h2>, and the intro copy — cover what someone searching it actually wants. Never keyword-stuff.' if target_keyword else ''}
 
 ABSOLUTE PRESERVATION RULES (breaking any of these breaks the live page):
 - Keep the ENTIRE <style>...</style> block(s) byte-for-byte unchanged.
@@ -638,3 +643,61 @@ Respond with ONLY a JSON object, no preamble, in exactly this shape:
         "css": str(data.get("css", "")).strip(),
         "summary": str(data.get("summary", "")).strip()[:300],
     }
+
+
+def build_keyword_map(site_name: str, site_url: str, pages: list, gsc_pages: dict) -> list:
+    """The Keyword Brain: assign each page the query it should rank for.
+
+    `pages` = [{"path", "title"}]; `gsc_pages` = {path: [{query, clicks,
+    impressions, position}]} (real Search Console demand, may be empty).
+    Returns [{"path", "primary", "secondary": [], "intent", "rationale"}].
+    Grounded: prefers queries with REAL impressions; otherwise infers from the
+    business + page topic. One primary per page, no two pages sharing one."""
+    lines = []
+    for p in pages[:40]:
+        path = p.get("path") or "/"
+        gq = gsc_pages.get(path) or []
+        demand = "; ".join(f'"{r["query"]}" ({r["impressions"]} impr, pos {r["position"]})' for r in gq[:5])
+        lines.append(f"- {path}  (title: {(p.get('title') or '')[:70]})"
+                     + (f"\n  real searches: {demand}" if demand else ""))
+    listing = "\n".join(lines)
+    prompt = f"""You are an SEO strategist building the TARGET KEYWORD MAP for a business website — which single search query each page should rank for.
+
+Business: {site_name} ({site_url})
+
+Pages (with REAL Google Search Console queries where available — impressions = actual demand):
+{listing}
+
+Rules:
+- One PRIMARY query per page: the most valuable realistic query that page can own. Prefer queries with real impressions; else infer from the business type, the page topic, and (for a local business) the location.
+- No two pages share the same primary (avoid cannibalization). 2-4 SECONDARY variants each.
+- intent: one of informational / commercial / transactional / local.
+- rationale: one short sentence (why this page can win this query).
+- Skip pure utility pages (privacy, terms, accessibility, contact, login) — do not map them.
+
+Respond with ONLY a JSON object:
+{{"map": [{{"path": "/x", "primary": "...", "secondary": ["...", "..."], "intent": "local", "rationale": "..."}}]}}"""
+    response = _get_client().messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=4000,
+        system="You are an SEO strategist. You respond only with a single JSON object and nothing else.",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    data = _extract_json(next((b.text for b in response.content if b.type == "text"), ""))
+    out = []
+    seen_paths, seen_primaries = set(), set()
+    for m in (data.get("map") or []):
+        path = "/" + str(m.get("path", "")).strip().strip("/")
+        primary = str(m.get("primary", "")).strip()
+        if not primary or path in seen_paths or primary.lower() in seen_primaries:
+            continue
+        seen_paths.add(path)
+        seen_primaries.add(primary.lower())
+        out.append({
+            "path": path if path != "/" else "/",
+            "primary": primary[:200],
+            "secondary": [str(x).strip()[:200] for x in (m.get("secondary") or [])[:4] if str(x).strip()],
+            "intent": str(m.get("intent", "")).strip()[:30],
+            "rationale": str(m.get("rationale", "")).strip()[:400],
+        })
+    return out

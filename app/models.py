@@ -335,3 +335,21 @@ class CapabilityRequest(Base):
     summary = Column(Text, default="")
     status = Column(String(20), default="open")  # open, planned, done, dismissed
     created_at = Column(DateTime, default=utcnow)
+
+
+class KeywordTarget(Base):
+    """The strategy layer: which query each page should rank for. Built by the
+    Keyword Brain from the business profile + real Search Console queries; read
+    by the meta/rewrite doers (query-aware copy) and the Targeting audit check."""
+
+    __tablename__ = "keyword_targets"
+
+    id = Column(Integer, primary_key=True)
+    site_id = Column(Integer, ForeignKey("sites.id", ondelete="CASCADE"), nullable=False)
+    page_path = Column(String(500), nullable=False)   # normalized path, e.g. /grill-repair
+    primary_kw = Column(String(200), nullable=False)
+    secondary_kws = Column(Text, default="[]")        # JSON list
+    intent = Column(String(30), default="")           # informational/commercial/transactional/local
+    rationale = Column(Text, default="")
+    source = Column(String(20), default="ai")         # ai, gsc, ai+gsc
+    created_at = Column(DateTime, default=utcnow)

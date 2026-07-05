@@ -4,11 +4,12 @@ Single source of truth for how many things Ascend audits and what each check is.
 Keep this updated whenever an auditor/check is added or changed. Pairs with
 `DOERS.md` (the fix side).
 
-**Audit check count (active): 42** across 4 auditors.
+**Audit check count (active): 44** across 5 auditors.
 _Last updated: 2026-07-01._
 
 Auditors (pipeline in `jobs._run_audit`):
-- **Crawler** (`crawler.py`) — 34 checks (homepage + up to 15 pages + site-level)
+- **Crawler** (`crawler.py`) — 35 checks (homepage + up to 30 pages + site-level)
+- **Keyword Brain** (`keyword_brain.py`) — 1 (targeting vs the keyword map)
 - **Content / E-E-A-T** (`content_analyzer.py` → Claude, `brain.CONTENT_CATS`) — 5
 - **Search Console** (`gsc.py`, when connected) — 2
 - **Performance** (`perf.py`, scored only when it runs) — 1
@@ -31,7 +32,7 @@ Lane = how the matching doer acts: 🟢 auto · 🔵 approval · 🟡 owner-only
 | `missing_viewport` | no mobile viewport meta | med | crawler | 🟢 Head/meta |
 | `structure` | no header / footer region | med | crawler | ⚪ often false positive |
 
-## On-page — 12 checks
+## On-page — 14 checks
 | Check (category) | Detects | Sev | Source | Handled by |
 |---|---|---|---|---|
 | `missing_title` | no `<title>` | high | crawler | 🟢 Meta |
@@ -41,6 +42,8 @@ Lane = how the matching doer acts: 🟢 auto · 🔵 approval · 🟡 owner-only
 | `multiple_h1` | more than one H1 | low | crawler | 🟢 Rewrite |
 | `heading_hierarchy` | skipped heading levels | low | crawler | 🟢 Rewrite |
 | `duplicate_title` | two pages share a title | med | crawler | 🔵 Dedupe-title |
+| `keyword_targeting` | page's title/H1 don't reflect its mapped target query | med | keyword-brain | 🟢 Meta (query-aware) |
+| `low_internal_links` | almost no contextual in-body links | low | crawler | 🟢 Linking (contextual) |
 | `striking_distance` | GSC: page ranking just off page 1 | — | gsc | 🔵 Ranking |
 | `low_ctr` | GSC: impressions but low CTR | — | gsc | 🔵 Ranking |
 | `og_incomplete` | missing Open Graph tags | low | crawler | 🟢 Head/meta |
@@ -89,14 +92,13 @@ Lane = how the matching doer acts: 🟢 auto · 🔵 approval · 🟡 owner-only
 |---|---|---|---|---|
 | `cwv_poor` | poor Core Web Vitals | — | perf | 🟢 Performance (lazy-load; CWV field data lags ~4wk) |
 
-## Defined but not yet emitted (3)
+## Defined but not yet emitted (2)
 Categories the router/scorer already understands but no active auditor produces
 yet — they light up when the matching auditor logic is added:
-`meta_title`, `meta_description` (sitewide meta scan), `low_internal_links`
-(on-page link-depth).
+`meta_title`, `meta_description` (sitewide meta scan).
 
 ---
 Note: some categories bundle multiple sub-checks (`indexation` = noindex +
 robots.txt + sitemap; `structure` = header + footer; `broken_link` = internal +
 external at several severities), so the literal number of probes run per page is
-higher than 42 — but 42 is the count of distinct routable/scored check-types.
+higher than 44 — but 44 is the count of distinct routable/scored check-types.

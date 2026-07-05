@@ -317,7 +317,8 @@ def validate_rewrite(old_html: str, new_html: str) -> list[str]:
 
 
 # -- the run -----------------------------------------------------------------
-def run_page_rewrite(site_id: int, run_id: int, conn: dict, page_id: int, page_title: str = "") -> None:
+def run_page_rewrite(site_id: int, run_id: int, conn: dict, page_id: int, page_title: str = "",
+                     target_keyword: str = "") -> None:
     db = SessionLocal()
     try:
         run = db.get(JobRun, run_id)
@@ -346,7 +347,8 @@ def run_page_rewrite(site_id: int, run_id: int, conn: dict, page_id: int, page_t
         try:
             with _REWRITE_SEM:  # cap concurrent rewrites to avoid API rate limits
                 result = rewrite_page_html(site.name, site.url, page_title or str(page_id),
-                                           old_html, rules_for("shared", "website"))
+                                           old_html, rules_for("shared", "website"),
+                                           target_keyword=target_keyword)
         except Exception as exc:
             run.status = "failed"
             run.summary = f"Rewrite generation failed: {exc.__class__.__name__}: {exc}"
@@ -414,6 +416,6 @@ def run_page_rewrite(site_id: int, run_id: int, conn: dict, page_id: int, page_t
 
 
 def start_page_rewrite_async(site_id: int, run_id: int, conn: dict,
-                             page_id: int, page_title: str = "") -> None:
+                             page_id: int, page_title: str = "", target_keyword: str = "") -> None:
     threading.Thread(target=run_page_rewrite,
-                     args=(site_id, run_id, conn, page_id, page_title), daemon=True).start()
+                     args=(site_id, run_id, conn, page_id, page_title, target_keyword), daemon=True).start()

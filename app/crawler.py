@@ -316,6 +316,28 @@ def crawl_site(start_url: str) -> dict:
             if imgs and len(no_dim) >= max(3, len(imgs) // 2):
                 issues.append(_issue("image_no_dimensions", "low", page_url,
                                      f"{len(no_dim)} of {len(imgs)} images have no width/height set (can cause layout shift / CLS)"))
+            # Contextual internal links — in-body links (outside header/footer/nav)
+            # pass authority and context; a content page with almost none is a
+            # dead end for both Google and visitors.
+            path_l = (urlparse(page_url).path or "/").lower()
+            if not any(u in path_l for u in UTILITY_PATHS):
+                body_soup = BeautifulSoup(resp.text, "html.parser")
+                for t in body_soup(["header", "footer", "nav", "script", "style"]):
+                    t.decompose()
+                host = urlparse(page_url).netloc.lower().removeprefix("www.")
+                ctx_links = 0
+                for a_tag in body_soup.find_all("a", href=True):
+                    href = a_tag["href"]
+                    if href.startswith("#") or href.startswith(("mailto:", "tel:")):
+                        continue
+                    h = urlparse(href).netloc.lower().removeprefix("www.")
+                    if (not h or h == host) and (urlparse(href).path or "/") not in ("/", path_l):
+                        ctx_links += 1
+                if ctx_links < 2:
+                    issues.append(_issue("low_internal_links", "low", page_url,
+                                         f"Only {ctx_links} contextual in-body link(s) to other pages — "
+                                         "internal links pass authority and guide visitors"))
+
             # Legacy image formats — JPEG/PNG where WebP/AVIF could serve instead.
             # Two cases: an imgix-style CDN (Unsplash/Pexels) missing auto=format
             # (defaults to JPEG), or a plain .jpg/.png file.

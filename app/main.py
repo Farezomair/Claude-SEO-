@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "approval-dedup-60"
+BUILD = "keyword-brain-61"
 
 
 @app.get("/version")
@@ -315,7 +315,7 @@ def _pipeline_state(run, report_id=None) -> dict:
 
 
 _DOER_JOB_KINDS = ["elementor", "image", "alttext", "schema", "schemaclean", "technical",
-                   "headmeta", "robots", "perf", "webp", "linking", "redirects", "pagedraft"]
+                   "headmeta", "robots", "perf", "webp", "linking", "ctxlinks", "redirects", "pagedraft"]
 _STATE_PRIORITY = {"active": 3, "failed": 2, "done": 1, "pending": 0}
 # Doer runs execute on in-process daemon threads, so any JobRun still 'running'
 # from BEFORE this process booted is a ghost (a redeploy killed its thread) — the
@@ -531,6 +531,13 @@ def site_detail(
         ctx["chart"] = _build_chart(pts)
         # Embedded Approvals + Settings panels.
         _collapse_dupe_approvals(db)
+        from .models import KeywordTarget
+        ctx["keyword_targets"] = (db.query(KeywordTarget)
+                                  .filter(KeywordTarget.site_id == site_id)
+                                  .order_by(KeywordTarget.page_path).all())
+        ctx["keywords_running"] = (db.query(JobRun)
+                                   .filter(JobRun.site_id == site_id, JobRun.kind == "keywords",
+                                           JobRun.status == "running").first() is not None)
         ctx["approval_items"] = _approval_items(db, site_id)
         ctx["human_tasks"] = _human_task_items(db, site_id)
         ctx["connection"] = db.query(SiteConnection).filter(SiteConnection.site_id == site_id).first()
@@ -1247,6 +1254,66 @@ def run_robots_now(site_id: int, request: Request, db: Session = Depends(get_db)
         db.refresh(run)
         from .robots_agent import start_robots_async
         start_robots_async(site_id, run.id, conn)
+    return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
+
+
+@app.post("/sites/{site_id}/build-keywords")
+def build_keywords_now(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """The Keyword Brain: build/refresh the target keyword map (business profile
+    + real Search Console demand). The strategy layer every doer reads."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return RedirectResponse(f"/sites/{site_id}?tab=settings&notice=test_none", status_code=303)
+    already = (db.query(JobRun)
+               .filter(JobRun.site_id == site_id, JobRun.kind == "keywords", JobRun.status == "running")
+               .first())
+    if not already:
+        run = JobRun(site_id=site_id, kind="keywords", status="running",
+                     summary="Building the keyword map…")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        from .keyword_brain import start_keyword_map_async
+        start_keyword_map_async(site_id, run.id, conn)
+    return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
+
+
+@app.post("/sites/{site_id}/run-context-links")
+def run_context_links_now(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """Contextual internal-linking doer across the site's mapped pages."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return RedirectResponse(f"/sites/{site_id}?tab=settings&notice=test_none", status_code=303)
+    from .elementor_agent import list_elementor_pages
+    from .context_link_agent import start_context_links_async
+    from .wordpress import WordPressClient as _WPC
+    links = {}
+    try:
+        for it in _WPC(conn["url"], conn["username"], conn["app_password"]).list_content(kinds=("pages",), limit=50):
+            if it.get("id"):
+                links[it["id"]] = it.get("link", "")
+    except Exception:
+        pass
+    for p in list_elementor_pages(conn)[:30]:
+        pid = p.get("id")
+        if not pid:
+            continue
+        run = JobRun(site_id=site_id, kind="ctxlinks", status="running",
+                     summary=f"Linking {p.get('title') or pid} into the site…")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        start_context_links_async(site_id, run.id, conn, pid, links.get(pid, ""), p.get("title", ""))
     return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
 
 

@@ -69,8 +69,18 @@ def run_weekly(site_id: int, weekly_run_id: int) -> None:
                 weekly.fixes_count = fixes
             db.commit()
 
-        # Phase 1 — Audit (fresh source of truth -> routed Findings).
+        # Phase 0 — Strategy: make sure the keyword map exists (query-aware crew).
         _phase("audit")
+        try:
+            from .connections import get_connection
+            from .keyword_brain import ensure_keyword_map
+            conn0 = get_connection(site_id, site.url, site.name)
+            if conn0:
+                ensure_keyword_map(site_id, conn0)
+        except Exception:
+            pass
+
+        # Phase 1 — Audit (fresh source of truth -> routed Findings).
         audit = Audit(site_id=site_id, status="running", summary="Weekly audit…")
         db.add(audit)
         db.commit()
