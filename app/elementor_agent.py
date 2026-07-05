@@ -375,15 +375,18 @@ def run_page_rewrite(site_id: int, run_id: int, conn: dict, page_id: int, page_t
         if flags:
             # Safety checks flagged something (truncation / lost structure / banned
             # words) — gate this one for human review rather than auto-applying.
-            db.add(Approval(
-                site_id=site_id, kind="page_rewrite",
-                title=f"SEO rewrite: {page_title or ('page ' + str(page_id))}",
-                summary=summary + "  ⚠ Review before approving: " + " ".join(flags),
-                payload=json.dumps({"change_id": change.id, "page_id": page_id, "flags": flags}),
-                status="pending",
-            ))
+            from .approval_guard import add_approval_if_new
+            _, created = add_approval_if_new(
+                db, site_id, "page_rewrite",
+                f"SEO rewrite: {page_title or ('page ' + str(page_id))}",
+                summary + "  ⚠ Review before approving: " + " ".join(flags),
+                {"change_id": change.id, "page_id": page_id, "flags": flags})
+            if not created:
+                change.status = "superseded"  # a rewrite for this page is already waiting
             run.status = "completed"
-            run.summary = f"Proposed an SEO rewrite of '{page_title or page_id}' — needs review ({len(flags)} flag(s))."
+            run.summary = (f"Proposed an SEO rewrite of '{page_title or page_id}' — needs review ({len(flags)} flag(s))."
+                           if created else
+                           f"A rewrite of '{page_title or page_id}' is already waiting in Approvals — skipped the duplicate.")
         else:
             # Clean rewrite — auto-apply to the live body (revertible).
             ok = write_body(client, page_id, new_html)

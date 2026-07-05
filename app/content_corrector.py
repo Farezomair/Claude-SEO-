@@ -69,14 +69,13 @@ def run_correction(site_id: int, run_id: int, conn: dict) -> None:
                 removed.append(f"{issues['em_dashes']} em dash(es)")
             summary = ("Editorial cleanup (meaning preserved): removed " + ", ".join(removed)
                        + f". Result passes the standard: {'yes' if not after['banned'] and after['em_dashes'] == 0 else 'review'}.")
-            db.add(Approval(
-                site_id=site_id, kind="content_fix",
-                title=f"Clean up: {item['title'] or item['link']}",
-                summary=summary,
-                payload=json.dumps({"content_id": content.id, "page_kind": item["kind"], "page_id": item["id"]}),
-                status="pending",
-            ))
-            drafted += 1
+            from .approval_guard import add_approval_if_new
+            _, created = add_approval_if_new(
+                db, site_id, "content_fix",
+                f"Clean up: {item['title'] or item['link']}", summary,
+                {"content_id": content.id, "page_kind": item["kind"], "page_id": item["id"]})
+            if created:
+                drafted += 1
             db.commit()
 
         run.status = "completed"

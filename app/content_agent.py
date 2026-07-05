@@ -44,16 +44,14 @@ def run_draft(site_id: int, run_id: int, topic: str = "") -> None:
         db.commit()
         db.refresh(content)
 
-        db.add(Approval(
-            site_id=site_id,
-            kind="content",
-            title=article["title"],
-            summary=article.get("meta_description", "")[:500],
-            payload=json.dumps({"content_id": content.id}),
-            status="pending",
-        ))
+        from .approval_guard import add_approval_if_new
+        _, created = add_approval_if_new(
+            db, site_id, "content", article["title"],
+            article.get("meta_description", "")[:500],
+            {"content_id": content.id})
         run.status = "completed"
-        run.summary = f"Drafted “{article['title']}” — waiting for your approval."
+        run.summary = (f"Drafted “{article['title']}” — waiting for your approval." if created
+                       else f"“{article['title']}” is already waiting in Approvals — skipped the duplicate.")
         db.add(RunLog(site_id=site_id, message=run.summary))
         db.commit()
     except Exception as exc:  # never let the thread die silently

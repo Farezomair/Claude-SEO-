@@ -616,6 +616,15 @@ def dispatch_fixes(site_id: int, progress_run_id: int | None = None) -> dict:
             except Exception:
                 pass
 
+        # Post-run safety net: collapse any duplicate approvals that slipped in
+        # (creation-time guards prevent most; this catches races between
+        # background doers). Newest per (site, kind, target/title) wins.
+        from .approval_guard import collapse_pending_duplicates
+        collapsed = collapse_pending_duplicates(db)
+        if collapsed:
+            db.add(RunLog(site_id=site_id, message=f"De-duplicated {collapsed} approval(s) after the run."))
+            db.commit()
+
         _set_progress(db, run, total, total, "Done")
         summary = (f"Worked {total} finding(s): {fixed} fixed, {proposed} sent to Approvals, "
                    f"{no_cap} need a doer we haven't built yet.")

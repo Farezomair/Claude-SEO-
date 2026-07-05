@@ -79,19 +79,16 @@ def run_meta_rewrites(site_id: int, run_id: int, conn: dict) -> None:
             summary = (f"Rewrite to improve clicks. "
                        f"Title: “{old_title or '(none)'}” → “{s['title']}”. "
                        f"Description: “{old_desc or '(none)'}” → “{s['description']}”.")
-            db.add(Approval(
-                site_id=site_id, kind="meta_rewrite",
-                title=f"Improve ranking page: {item['title'] or item['link']}",
-                summary=summary,
-                payload=json.dumps({
-                    "finding_id": f.id, "page_kind": item["kind"], "page_id": item["id"],
-                    "new_title": s["title"], "new_desc": s["description"],
-                    "old_title": old_title, "old_desc": old_desc,
-                }),
-                status="pending",
-            ))
+            from .approval_guard import add_approval_if_new
+            _, created = add_approval_if_new(
+                db, site_id, "meta_rewrite",
+                f"Improve ranking page: {item['title'] or item['link']}", summary,
+                {"finding_id": f.id, "page_kind": item["kind"], "page_id": item["id"],
+                 "new_title": s["title"], "new_desc": s["description"],
+                 "old_title": old_title, "old_desc": old_desc})
             f.status = "in-progress"
-            drafted += 1
+            if created:
+                drafted += 1
             db.commit()
 
         run.status = "completed"

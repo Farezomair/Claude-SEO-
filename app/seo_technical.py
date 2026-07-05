@@ -244,19 +244,17 @@ def run_dedupe_titles(site_id: int, run_id: int, conn: dict) -> None:
                 new_title = s.get("title", "")
                 if not new_title or new_title.strip().lower() == old_title.lower():
                     continue
-                db.add(Approval(
-                    site_id=site_id, kind="meta_rewrite",
-                    title=f"Make title unique: {it['link']}",
-                    summary=f"Duplicate title. “{old_title}” → “{new_title}”.",
-                    payload=json.dumps({
-                        "finding_id": finding.id if finding else None,
-                        "page_kind": it["kind"], "page_id": it["id"],
-                        "new_title": new_title, "new_desc": "",
-                        "old_title": old_title, "old_desc": "",
-                    }),
-                    status="pending",
-                ))
-                drafted += 1
+                from .approval_guard import add_approval_if_new
+                _, created = add_approval_if_new(
+                    db, site_id, "meta_rewrite",
+                    f"Make title unique: {it['link']}",
+                    f"Duplicate title. “{old_title}” → “{new_title}”.",
+                    {"finding_id": finding.id if finding else None,
+                     "page_kind": it["kind"], "page_id": it["id"],
+                     "new_title": new_title, "new_desc": "",
+                     "old_title": old_title, "old_desc": ""})
+                if created:
+                    drafted += 1
             if finding:
                 finding.status = "in-progress"
             db.commit()

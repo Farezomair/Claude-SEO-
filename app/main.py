@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "saas-ui-59"
+BUILD = "approval-dedup-60"
 
 
 @app.get("/version")
@@ -1633,44 +1633,12 @@ def revert_img_dims(site_id: int, request: Request, page_id: int = 12, db: Sessi
 # --------------------------------------------------------------------------
 # Approvals (the safety gate)
 # --------------------------------------------------------------------------
-def _approval_target(a) -> tuple | None:
-    """The logical thing an approval acts on — so two proposals editing the SAME
-    page collapse even when their titles differ (e.g. 'Boost ranking page: /x' vs
-    'Make title unique: /x', both meta_rewrite on the same page_id)."""
-    try:
-        p = json.loads(a.payload or "{}")
-    except Exception:
-        return None
-    for k in ("page_id", "change_id"):
-        if p.get(k) is not None:
-            return (k, p[k])
-    return None
-
-
 def _collapse_dupe_approvals(db) -> None:
-    """Keep the newest pending approval per logical target; supersede the rest.
-
-    Dedupes within a kind by BOTH (site, kind, title) AND (site, kind, target):
-    a later/older proposal is collapsed if either its title OR its edit target
-    (payload page_id/change_id) was already seen on a newer one. Title catches
-    'Create privacy page' repeats (different content_id each draft); target
-    catches same-page edits with differing titles."""
-    dupes = (db.query(Approval).filter(Approval.status == "pending")
-             .order_by(Approval.created_at.desc()).all())  # newest first
-    seen_title, seen_target, changed = set(), set(), False
-    for a in dupes:
-        tkey = (a.site_id, a.kind, a.title)
-        target = _approval_target(a)
-        gkey = (a.site_id, a.kind, target) if target is not None else None
-        if tkey in seen_title or (gkey is not None and gkey in seen_target):
-            a.status = "superseded"
-            changed = True
-        else:
-            seen_title.add(tkey)
-            if gkey is not None:
-                seen_target.add(gkey)
-    if changed:
-        db.commit()
+    """View-time safety net — one identity rule for approvals lives in
+    approval_guard (also enforced at creation time by every doer, and after
+    every dispatch run)."""
+    from .approval_guard import collapse_pending_duplicates
+    collapse_pending_duplicates(db)
 
 
 def _human_task_items(db, site_id=None) -> list:
