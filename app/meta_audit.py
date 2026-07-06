@@ -8,6 +8,7 @@ title against the live rendered <title> and flags mismatches as
 `title_conflict` (the Meta Agent also re-verifies against the rendered page after
 every write, so it can't claim a fix the theme swallowed).
 """
+import html as _html
 import re
 
 import httpx
@@ -19,7 +20,9 @@ MAX_CHECKS = 10
 
 
 def _norm(t: str) -> str:
-    return re.sub(r"\s+", " ", (t or "")).strip().lower()
+    # Unescape entities so "&amp;" == "&" — otherwise a rendered title that
+    # matches its SEO title byte-for-byte still looks like a conflict.
+    return re.sub(r"\s+", " ", _html.unescape(t or "")).strip().lower()
 
 
 def rendered_title(url: str) -> str:
