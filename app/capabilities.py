@@ -111,9 +111,9 @@ AUDIT_CATEGORIES = [
 # empty list = runs inline inside the dispatcher.
 DOERS = [
     {"key": "meta", "agent": "Meta Agent", "lane": "auto", "status": "active",
-     "summary": "titles & descriptions (Yoast)",
-     "desc": "Writes SEO-optimized titles and meta descriptions via Yoast and verifies them live.",
-     "job_kinds": []},
+     "summary": "titles & descriptions (Yoast) + rendered-title enforcement",
+     "desc": "Writes query-aware SEO titles and descriptions via Yoast, verifies them on the RENDERED page, and \u2014 when a theme overrides the SEO title \u2014 enforces it through the Bridge title override.",
+     "job_kinds": ["titlefix"]},
     {"key": "elementor", "agent": "Elementor Agent", "lane": "auto", "status": "active",
      "summary": "content / E-E-A-T / headings / GEO",
      "desc": "Rewrites full pages for depth, E-E-A-T, heading structure, and AI-citable answers. "
@@ -144,9 +144,9 @@ DOERS = [
      "desc": "301-redirects dead internal URLs to the most relevant live page, AND rewrites internal links to point straight at their final URLs (no 301 detours). Verified live.",
      "job_kinds": ["redirects", "hrefs"]},
     {"key": "technical", "agent": "Technical Agent", "lane": "auto", "status": "active",
-     "summary": "security headers + llms.txt",
-     "desc": "Sets security response headers and serves /llms.txt through the Bridge plugin, then re-checks the live site.",
-     "job_kinds": ["technical"]},
+     "summary": "security headers + llms.txt + archive noindexing",
+     "desc": "Sets security response headers, serves /llms.txt, and noindexes thin tag/category/author archives (Yoast drops them from the sitemap) \u2014 all through the Bridge, verified live.",
+     "job_kinds": ["technical", "archives"]},
     {"key": "headmeta", "agent": "Head/meta Agent", "lane": "auto", "status": "active",
      "summary": "canonical / Open Graph / viewport / favicon",
      "desc": "Injects the <head> tags a page is missing — self-canonical, Open Graph, mobile viewport, and a favicon — via the Bridge, verified live.",

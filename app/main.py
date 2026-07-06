@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "precision-batch-63"
+BUILD = "bridge9-doers-64"
 
 
 @app.get("/version")
@@ -316,7 +316,7 @@ def _pipeline_state(run, report_id=None) -> dict:
 
 _DOER_JOB_KINDS = ["elementor", "image", "alttext", "schema", "schemaclean", "technical",
                    "headmeta", "robots", "perf", "webp", "linking", "ctxlinks", "redirects", "hrefs",
-                   "pagedraft"]
+                   "archives", "titlefix", "pagedraft"]
 _STATE_PRIORITY = {"active": 3, "failed": 2, "done": 1, "pending": 0}
 # Doer runs execute on in-process daemon threads, so any JobRun still 'running'
 # from BEFORE this process booted is a ghost (a redeploy killed its thread) — the
@@ -1083,6 +1083,33 @@ def bridge_selftest(site_id: int, request: Request, db: Session = Depends(get_db
     except Exception as e:
         out["robots"] = {"error": f"{e.__class__.__name__}: {e}"}
 
+    # YOAST ARCHIVES (v9): read state, set tags=true, read back, restore.
+    try:
+        before = None
+        with httpx.Client(timeout=30.0, auth=auth, follow_redirects=True) as c:
+            rb = c.get(f"{base}/wp-json/seo-agent/v1/yoast-archives")
+            before = rb.json() if rb.status_code == 200 else None
+        if before is None:
+            out["archives"] = {"error": "endpoint missing (Bridge v9 not active?)"}
+        elif not before.get("yoast"):
+            out["archives"] = {"yoast": False, "note": "Yoast not active"}
+        else:
+            wrote = _post("yoast-archives", {"tags": True})
+            out["archives"] = {"write_ok": bool(wrote.get("tags")),
+                               "reverted": _post("yoast-archives", {"tags": bool(before.get("tags"))})
+                               .get("tags") == bool(before.get("tags"))}
+    except Exception as e:
+        out["archives"] = {"error": f"{e.__class__.__name__}: {e}"}
+
+    # TITLE OVERRIDE (v9): toggle on, read back, toggle off.
+    try:
+        wrote = _post("title-override", {"enabled": True})
+        out["title_override"] = {"write_ok": bool(wrote.get("enabled")),
+                                 "reverted": _post("title-override", {"enabled": False})
+                                 .get("enabled") is False}
+    except Exception as e:
+        out["title_override"] = {"error": f"{e.__class__.__name__}: {e}"}
+
     # REDIRECTS: add a test 301, verify it actually serves, then clear it.
     try:
         _post("redirects", {"set": {"/__ascend_selftest": "/"}})
@@ -1315,6 +1342,57 @@ def run_context_links_now(site_id: int, request: Request, db: Session = Depends(
         db.commit()
         db.refresh(run)
         start_context_links_async(site_id, run.id, conn, pid, links.get(pid, ""), p.get("title", ""))
+    return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
+
+
+@app.post("/sites/{site_id}/run-archives")
+def run_archives_now(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """Archive-noindex doer: noindex thin tag/category/author archives via Yoast
+    (Bridge v9), verified live."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return RedirectResponse(f"/sites/{site_id}?tab=settings&notice=test_none", status_code=303)
+    already = (db.query(JobRun)
+               .filter(JobRun.site_id == site_id, JobRun.kind == "archives", JobRun.status == "running")
+               .first())
+    if not already:
+        run = JobRun(site_id=site_id, kind="archives", status="running",
+                     summary="Noindexing thin archive pages\u2026")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        from .archive_agent import start_archive_noindex_async
+        start_archive_noindex_async(site_id, run.id, conn)
+    return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
+
+
+@app.post("/sites/{site_id}/run-titlefix")
+def run_titlefix_now(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """Title-override doer: the SEO title wins over the theme's <title> (Bridge v9)."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return RedirectResponse(f"/sites/{site_id}?tab=settings&notice=test_none", status_code=303)
+    already = (db.query(JobRun)
+               .filter(JobRun.site_id == site_id, JobRun.kind == "titlefix", JobRun.status == "running")
+               .first())
+    if not already:
+        run = JobRun(site_id=site_id, kind="titlefix", status="running",
+                     summary="Enforcing the SEO title on the rendered page\u2026")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        from .meta_audit import start_title_override_async
+        start_title_override_async(site_id, run.id, conn)
     return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
 
 

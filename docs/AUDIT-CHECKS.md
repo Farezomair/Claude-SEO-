@@ -31,7 +31,7 @@ Google's quality systems treat it.
 | `schema_duplicate_entity` | 2+ unlinked LocalBusiness entities on a page | med | 🟢 Schema-cleanup |
 | `stock_images_hotlinked` | hotlinked stock photos presented as the business's work | high | 🟡 Owner (real photos) |
 | `internal_redirect_links` | ≥50% of internal links pass through 301s | med | 🟢 Redirects (href rewrite, verified on the live homepage) |
-| `junk_archives` | tag/category/author archives in the sitemap | med | ⚪ Yoast-settings Bridge ability (planned) |
+| `junk_archives` | tag/category/author archives in the sitemap | med | 🟢 Technical (Yoast noindex via Bridge v9, verified live) |
 | `stale_year_title` | title still says 2019–2025 | low | 🟢 Meta |
 | `heading_concat` | headings render with glued words (theme markup bug) | med | 🟢 Rewrite |
 | `duplicate_post` | /post-2, /post-3 republished duplicates (cannibalization) | med | 🟡 Owner picks survivor → Redirects 301s |

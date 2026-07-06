@@ -473,6 +473,39 @@ def _propose_schema_cleanup(db, ctx, f):
             "Removing broken/placeholder/deprecated structured data from the live page (verified).", False)
 
 
+def _propose_archives(db, ctx, f):
+    """Noindex thin tag/category/author archives via Yoast (Bridge v9; once per run)."""
+    if ctx.get("archives_done"):
+        return ("in-progress", "Covered by the archive-noindex fix running this run.", False)
+    from .archive_agent import start_archive_noindex_async
+    aj = JobRun(site_id=ctx["site"].id, kind="archives", status="running",
+                summary="Noindexing thin archive pages\u2026")
+    db.add(aj)
+    db.commit()
+    db.refresh(aj)
+    start_archive_noindex_async(ctx["site"].id, aj.id, ctx["conn"])
+    ctx["archives_done"] = True
+    return ("in-progress",
+            "Noindexing tag/category/author archives (Yoast drops them from the sitemap) \u2014 verified live.", False)
+
+
+def _propose_title_fix(db, ctx, f):
+    """Make the rendered page serve the intended SEO title (Bridge v9; once per run)."""
+    if ctx.get("titlefix_done"):
+        return ("in-progress", "Covered by the title-override fix running this run.", False)
+    from .meta_audit import start_title_override_async
+    tj = JobRun(site_id=ctx["site"].id, kind="titlefix", status="running",
+                summary="Enforcing the SEO title on the rendered page\u2026")
+    db.add(tj)
+    db.commit()
+    db.refresh(tj)
+    start_title_override_async(ctx["site"].id, tj.id, ctx["conn"])
+    ctx["titlefix_done"] = True
+    return ("in-progress",
+            "The theme overrides the SEO title \u2014 enabling the Bridge title override and verifying the "
+            "rendered titles live.", False)
+
+
 def _propose_href_rewrite(db, ctx, f):
     """Rewrite internal hrefs to their final URLs (fires once per run)."""
     if ctx.get("hrefs_done"):
@@ -568,8 +601,9 @@ HANDLERS = {
     "image_legacy_format": _propose_webp,
     "keyword_targeting": _fix_meta,
     "stale_year_title": _fix_meta,
-    "title_conflict": _fix_meta,
+    "title_conflict": _propose_title_fix,
     "internal_redirect_links": _propose_href_rewrite,
+    "junk_archives": _propose_archives,
     "low_internal_links": _propose_context_links,
     "schema_selfserving_reviews": _propose_schema_cleanup,
     "schema_duplicate_entity": _propose_schema_cleanup,

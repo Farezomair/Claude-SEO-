@@ -14,12 +14,12 @@ finding. Lanes: 🟢 auto (applied + verified live) · 🔵 needs owner approval
 
 | # | Doer | Module / handler | Fixes (audit categories) | Lane |
 |---|------|------------------|--------------------------|------|
-| 1 | Meta | `dispatcher._fix_meta` → `wordpress.py` (query-aware via the Keyword Brain) | `meta_title`, `meta_description`, `missing_title`, `meta_description_missing`, `title_length`, `keyword_targeting`, `stale_year_title`, `title_conflict` (verifies the RENDERED title; escalates when the theme overrides) | 🟢 |
+| 1 | Meta | `dispatcher._fix_meta` → `wordpress.py` (query-aware via the Keyword Brain) | `meta_title`, `meta_description`, `missing_title`, `meta_description_missing`, `title_length`, `keyword_targeting`, `stale_year_title`, `title_conflict` (rendered-title verification + Bridge v9 title override) | 🟢 |
 | 2 | Elementor rewrite | `elementor_agent.run_page_rewrite` | `thin_content`, `eeat_weak`, `content_shallow`, `content_stale`, `geo_unstructured`, `heading_hierarchy`, `missing_h1`, `multiple_h1`, `nap_missing`, `heading_concat` | 🟢 if safe, else 🔵 |
 | 3 | Image dimensions | `image_agent.run_image_dims` | `image_no_dimensions` | 🟢 |
 | 4 | Required-pages | `dispatcher._propose_required_page` → `wordpress.create_page` | `required_page_missing` (create + publish) | 🟢 |
 | 5 | Linking | `link_agent.run_footer_links` + `context_link_agent.run_context_links` | `required_page_missing` (orphaned → footer link), `low_internal_links` (contextual in-body links, query-aware anchors) | 🟢 |
-| 6 | Technical | `technical_agent.run_technical_fixes` (Bridge) | `security_headers`, `no_llms_txt` | 🟢 |
+| 6 | Technical | `technical_agent.run_technical_fixes` + `archive_agent.run_archive_noindex` (Bridge v9) | `security_headers`, `no_llms_txt`, `junk_archives` | 🟢 |
 | 7 | Schema | `schema_agent.run_schema_inject` | `no_entity_schema`, `no_localbusiness_schema`, `missing_schema` | 🔵 |
 | 8 | Dedupe-title | `dispatcher._propose_dedupe` | `duplicate_title` | 🔵 |
 | 9 | Ranking | `dispatcher._propose_ranking` → `brain.improve_meta` | `striking_distance`, `low_ctr` | 🔵 |
