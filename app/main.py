@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "entity-fix-65"
+BUILD = "rank-tracker-66"
 
 
 @app.get("/version")
@@ -532,6 +532,8 @@ def site_detail(
         ctx["chart"] = _build_chart(pts)
         # Embedded Approvals + Settings panels.
         _collapse_dupe_approvals(db)
+        from .rank_tracker import rank_rows
+        ctx["rank_rows"] = rank_rows(db, site_id)
         from .models import KeywordTarget
         ctx["keyword_targets"] = (db.query(KeywordTarget)
                                   .filter(KeywordTarget.site_id == site_id)
@@ -1342,6 +1344,23 @@ def run_context_links_now(site_id: int, request: Request, db: Session = Depends(
         db.commit()
         db.refresh(run)
         start_context_links_async(site_id, run.id, conn, pid, links.get(pid, ""), p.get("title", ""))
+    return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
+
+
+@app.post("/sites/{site_id}/track-ranks")
+def track_ranks_now(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """Rank tracker: snapshot every target keyword's Google position now (GSC,
+    7-day window). Runs inline — one Search Console call."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+    from .rank_tracker import take_snapshot
+    try:
+        take_snapshot(site_id, site.url)
+    except Exception:
+        pass
     return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
 
 

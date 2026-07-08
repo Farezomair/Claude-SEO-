@@ -110,6 +110,15 @@ def run_weekly(site_id: int, weekly_run_id: int) -> None:
         _build_report(db, site, audit, issue_count, fixes_applied)
         steps.append("wrote report")
 
+        # Phase 6 — Outcome loop: snapshot target-keyword positions (GSC).
+        try:
+            from .rank_tracker import take_snapshot
+            n = take_snapshot(site_id, site.url)
+            if n:
+                steps.append(f"tracked {n} keyword position(s)")
+        except Exception:
+            pass
+
         _phase("done", findings=issue_count, fixes=fixes_applied)
         weekly.status = "completed"
         weekly.summary = "Weekly run: " + ", ".join(steps) + "."

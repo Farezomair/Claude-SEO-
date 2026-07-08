@@ -149,6 +149,46 @@
   </details>
   {% endif %}
 
+  <!-- Rankings — the outcome loop (expandable) -->
+  <details class="cc-panel" {{ 'open' if rank_rows else '' }}>
+    <summary><h2>Rankings — are the fixes moving Google?</h2>{% if rank_rows %}<span class="pill-count" style="margin-left:6px;">{{ rank_rows|length }}</span>{% endif %}</summary>
+    <div class="panel-body">
+      <p class="muted" style="margin-top:0; font-size:13px;">
+        Each target keyword's real Google position (Search Console, 7-day window), tracked on every weekly run.
+        Lower is better — the trend shows whether the crew's fixes are moving rankings, not just the health score.
+      </p>
+      <form method="post" action="/sites/{{ site.id }}/track-ranks" style="margin-bottom:14px;">
+        <button class="btn secondary small" type="submit">Track positions now</button>
+      </form>
+      {% if rank_rows %}
+      <div class="card" style="padding:0; margin:0;">
+        <table>
+          <thead><tr><th>Target keyword</th><th>Page</th><th>Position</th><th>Trend</th><th>Change</th><th>Fixes on page</th></tr></thead>
+          <tbody>
+            {% for r in rank_rows %}
+            <tr>
+              <td style="font-weight:600;">{{ r.keyword }}<div class="muted" style="font-size:11.5px; font-weight:400;">{{ r.impressions }} impressions / 7d</div></td>
+              <td class="muted" style="font-size:12.5px; white-space:nowrap;">{{ r.path }}</td>
+              <td style="font-weight:700; font-variant-numeric:tabular-nums;">{{ r.latest }}</td>
+              <td>{% if r.spark %}<svg viewBox="0 0 120 26" style="width:120px; height:26px;"><polyline points="{{ r.spark }}" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linejoin="round"/></svg>{% else %}<span class="muted" style="font-size:12px;">{{ r.snaps }} snapshot{{ '' if r.snaps == 1 else 's' }}</span>{% endif %}</td>
+              <td>
+                {% if r.snaps < 2 %}<span class="muted" style="font-size:12px;">baseline</span>
+                {% elif r.delta > 0 %}<span style="color:#0a9b6d; font-weight:700;">▲ {{ r.delta }}</span>
+                {% elif r.delta < 0 %}<span style="color:#dc4664; font-weight:700;">▼ {{ -r.delta }}</span>
+                {% else %}<span class="muted">—</span>{% endif %}
+              </td>
+              <td class="muted" style="font-size:12.5px;">{{ r.page_fixes or '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty">No position data yet — Google hasn't shown these pages for their target queries in the last 7 days (or Google isn't connected). Snapshots build automatically on every weekly run.</div>
+      {% endif %}
+    </div>
+  </details>
+
   <!-- Strategy — the keyword map (expandable) -->
   <details class="cc-panel">
     <summary><h2>Strategy — keyword targets</h2>{% if keyword_targets %}<span class="pill-count" style="margin-left:6px;">{{ keyword_targets|length }}</span>{% endif %}</summary>

@@ -353,3 +353,20 @@ class KeywordTarget(Base):
     rationale = Column(Text, default="")
     source = Column(String(20), default="ai")         # ai, gsc, ai+gsc
     created_at = Column(DateTime, default=utcnow)
+
+
+class RankSnapshot(Base):
+    """One Google position measurement for a target keyword (from Search
+    Console, 7-day window). Taken on every weekly run — the outcome loop that
+    shows whether the fixes actually moved rankings."""
+
+    __tablename__ = "rank_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    site_id = Column(Integer, ForeignKey("sites.id", ondelete="CASCADE"), nullable=False)
+    keyword = Column(String(200), nullable=False)
+    page_path = Column(String(500), default="")
+    position = Column(Integer, nullable=True)      # stored x10 (e.g. 84 = pos 8.4)
+    clicks = Column(Integer, default=0)
+    impressions = Column(Integer, default=0)
+    created_at = Column(DateTime, default=utcnow)
