@@ -291,6 +291,26 @@
     .fres-in-progress { color:#0284c7; }
     .fres-no-capability { color:var(--muted-2); }
     .fres-escalated, .fres-reopened { color:#dc4664; }
+
+    /* ── Toasts + in-card working bar (async approvals) ── */
+    #asc-toasts { position:fixed; right:22px; bottom:22px; z-index:9999; display:flex; flex-direction:column; gap:10px; }
+    .asc-toast { background:#101b3e; color:#fff; border-radius:12px; padding:13px 18px; font-size:13.5px; font-weight:600;
+      box-shadow:0 8px 30px rgba(16,24,40,.28); display:flex; align-items:center; gap:10px; max-width:360px;
+      animation:asc-in .22s ease; }
+    .asc-toast.ok::before { content:'✓'; color:#34d399; font-weight:800; }
+    .asc-toast.info::before { content:'✨'; }
+    .asc-toast.err { background:#7f1d34; }
+    .asc-toast.err::before { content:'!'; color:#fecdd3; font-weight:800; }
+    .asc-toast.out { animation:asc-out .25s ease forwards; }
+    @keyframes asc-in { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+    @keyframes asc-out { to { opacity:0; transform:translateY(8px); } }
+    .card-working { position:absolute; left:0; top:0; right:0; height:3px; border-radius:16px 16px 0 0; overflow:hidden; }
+    .card-working > i { display:block; height:100%;
+      background:linear-gradient(90deg, rgba(79,70,229,0) 0%, #4f46e5 50%, rgba(79,70,229,0) 100%);
+      background-size:200% 100%; animation:cc-flow 1.1s linear infinite; }
+    .card.working { position:relative; }
+    .card.leaving { transition:opacity .35s ease, transform .35s ease, max-height .4s ease .1s, margin .4s ease .1s, padding .4s ease .1s;
+      opacity:0; transform:translateY(-6px) scale(.99); max-height:0 !important; margin:0 !important; padding:0 !important; overflow:hidden; border-width:0; }
   </style>
 </head>
 <body>
@@ -304,7 +324,7 @@
     <div class="side-h">Overview</div>
     <a class="navlink {{ 'active' if nav == 'home' else '' }}" href="/sites"><span class="ico">⌂</span> Home</a>
     <div class="side-h">Work</div>
-    <a class="navlink" href="/approvals"><span class="ico">✓</span> Approvals{% if pending_count %} <span class="pill-count">{{ pending_count }}</span>{% endif %}</a>
+    <a class="navlink" href="/approvals"><span class="ico">✓</span> Approvals{% if pending_count %} <span class="pill-count approvals-count">{{ pending_count }}</span>{% endif %}</a>
     <div class="side-h">Capabilities</div>
     <a class="navlink" href="/capabilities#audit"><span class="ico">🔍</span> Audit checks</a>
     <a class="navlink" href="/capabilities#doers"><span class="ico">🤖</span> Doers</a>
@@ -317,5 +337,91 @@
   <main class="main">
   {% block body %}{% endblock %}
   </main>
+  <div id="asc-toasts"></div>
+  <script>
+    (function () {
+      function toast(kind, msg, ms) {
+        var wrap = document.getElementById('asc-toasts');
+        var t = document.createElement('div');
+        t.className = 'asc-toast ' + kind;
+        t.textContent = msg;
+        wrap.appendChild(t);
+        setTimeout(function () { t.classList.add('out'); setTimeout(function () { t.remove(); }, 260); }, ms || 2600);
+      }
+
+      function dropCounts() {
+        document.querySelectorAll('.approvals-count').forEach(function (el) {
+          var n = parseInt(el.textContent, 10) || 0;
+          if (n <= 1) { el.remove(); } else { el.textContent = n - 1; }
+        });
+      }
+
+      var RE = /\/(approvals\/\d+\/(approve|reject|amend)|findings\/\d+\/(done|snooze))(\?|$)/;
+
+      document.addEventListener('submit', function (ev) {
+        var form = ev.target;
+        var action = form.getAttribute('action') || '';
+        var m = RE.exec(action);
+        if (!m) return;                     // not an approvals form — normal submit
+        ev.preventDefault();
+        var kind = m[2] || m[3];
+        var card = form.closest('.card') || form.parentElement;
+        var btn = form.querySelector('button[type=submit]') || form.querySelector('button');
+        var buttons = card ? card.querySelectorAll('button') : form.querySelectorAll('button');
+        var oldText = btn ? btn.innerHTML : '';
+        buttons.forEach(function (b) { b.disabled = true; });
+        if (btn) { btn.innerHTML = 'Working…'; }
+        var bar = null;
+        if (card) {
+          card.classList.add('working');
+          bar = document.createElement('div');
+          bar.className = 'card-working';
+          bar.innerHTML = '<i></i>';
+          card.prepend(bar);
+        }
+
+        fetch(action, { method: 'POST', body: new FormData(form), credentials: 'same-origin', redirect: 'follow' })
+          .then(function (r) {
+            var failed = !r.ok || /notice=[^&]*fail/.test(r.url || '');
+            if (failed) throw new Error('failed');
+            if (kind === 'amend') {
+              if (bar) bar.remove();
+              if (card) card.classList.remove('working');
+              buttons.forEach(function (b) { b.disabled = false; });
+              if (btn) btn.innerHTML = oldText;
+              var ta = form.querySelector('textarea'); if (ta) ta.value = '';
+              var det = form.closest('details'); if (det) det.open = false;
+              toast('info', 'Sent to the AI — it\u2019s regenerating this proposal. It will reappear here shortly.', 3400);
+              return;
+            }
+            var msgs = {
+              approve: 'Approved — applied to the live site',
+              reject: 'Rejected — the proposal was dismissed',
+              done: 'Marked done — the next audit will re-check it',
+              snooze: 'Snoozed — it will reappear after the next audit'
+            };
+            var msg = msgs[kind] || 'Done';
+            if (kind === 'approve') {
+              var pub = form.querySelector('input[name=publish]');
+              if (pub && pub.value === '0') msg = 'Approved — saved as a WordPress draft';
+            }
+            toast(kind === 'reject' ? 'info' : 'ok', msg);
+            if (kind === 'approve' || kind === 'reject') dropCounts();
+            if (card) {
+              card.style.maxHeight = card.scrollHeight + 'px';
+              requestAnimationFrame(function () { card.classList.add('leaving'); });
+              setTimeout(function () { card.remove(); }, 620);
+            }
+          })
+          .catch(function () {
+            if (bar) bar.remove();
+            if (card) card.classList.remove('working');
+            buttons.forEach(function (b) { b.disabled = false; });
+            if (btn) btn.innerHTML = oldText;
+            toast('err', 'Something went wrong — nothing was changed. Try again.', 3400);
+          });
+      }, true);
+    })();
+  </script>
 </body>
 </html>
