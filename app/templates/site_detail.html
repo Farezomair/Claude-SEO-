@@ -366,6 +366,107 @@
   .lv-tick { width:14px; font-weight:700; text-align:center; flex:none; }
   .lv-row.lv-pending .lv-name { color:var(--muted); }
 </style>
+<!-- Fix Chat dock: talk to this site, get fixes applied -->
+<button class="fc-fab" id="fc-fab" type="button" onclick="fcToggle()">💬 <span>Fix chat</span></button>
+<div class="fc-dock" id="fc-dock" style="display:none;">
+  <div class="fc-head">
+    <div><b>Fix Chat</b><span class="fc-sub">changes {{ site.name }} only — nothing else</span></div>
+    <button type="button" class="fc-x" onclick="fcToggle()">×</button>
+  </div>
+  <div class="fc-msgs" id="fc-msgs">
+    <div class="fc-msg bot">Tell me the fix and I'll apply it across the site — e.g. <i>"the real phone is 208 856 3233, update it everywhere"</i> or <i>"our license number is RCE 69511, replace the placeholder"</i>. Every change is snapshotted and re-checked by the next audit.</div>
+  </div>
+  <form class="fc-input" onsubmit="return fcSend(event)">
+    <input type="text" id="fc-text" maxlength="800" placeholder="Describe the fix for this website…" autocomplete="off" required>
+    <button class="btn small" type="submit" id="fc-send">Send</button>
+  </form>
+</div>
+
+<style>
+  .fc-fab { position:fixed; right:22px; bottom:22px; z-index:900; display:inline-flex; align-items:center; gap:8px;
+    background:var(--side-bg); color:#fff; border:none; border-radius:999px; padding:13px 20px; font:inherit;
+    font-size:14px; font-weight:700; cursor:pointer; box-shadow:0 10px 30px rgba(16,24,40,.3); }
+  .fc-fab:hover { transform:translateY(-1px); }
+  .fc-dock { position:fixed; right:22px; bottom:22px; z-index:950; width:390px; max-width:calc(100vw - 30px);
+    background:#fff; border:1px solid var(--border); border-radius:18px; box-shadow:0 18px 50px rgba(16,24,40,.25);
+    display:flex; flex-direction:column; overflow:hidden; }
+  .fc-head { background:var(--side-bg); color:#fff; padding:13px 16px; display:flex; align-items:center; justify-content:space-between; }
+  .fc-head .fc-sub { display:block; font-size:11px; font-weight:500; color:#aab3d0; }
+  .fc-x { background:none; border:none; color:#aab3d0; font-size:20px; cursor:pointer; line-height:1; }
+  .fc-msgs { padding:14px; display:flex; flex-direction:column; gap:9px; overflow-y:auto; max-height:44vh; min-height:120px; background:var(--panel-2); }
+  .fc-msg { max-width:85%; padding:9px 13px; border-radius:13px; font-size:13px; line-height:1.5; white-space:pre-wrap; }
+  .fc-msg.user { align-self:flex-end; background:var(--accent); color:#fff; border-bottom-right-radius:4px; }
+  .fc-msg.bot { align-self:flex-start; background:#fff; border:1px solid var(--border); border-bottom-left-radius:4px; }
+  .fc-msg.bot.err { border-color:#f7c6d0; color:#b42346; }
+  .fc-msg.typing { color:var(--muted); font-style:italic; }
+  .fc-input { display:flex; gap:8px; padding:11px; border-top:1px solid var(--border); background:#fff; }
+  .fc-input input { flex:1; min-width:0; padding:10px 13px; font-size:13px; }
+</style>
+<script>
+  var fcHistory = [];
+  function fcToggle() {
+    var d = document.getElementById('fc-dock'), f = document.getElementById('fc-fab');
+    var open = d.style.display !== 'none';
+    d.style.display = open ? 'none' : 'flex';
+    f.style.display = open ? 'inline-flex' : 'none';
+    if (!open) document.getElementById('fc-text').focus();
+  }
+  function fcAdd(cls, text) {
+    var m = document.getElementById('fc-msgs');
+    var el = document.createElement('div');
+    el.className = 'fc-msg ' + cls;
+    el.textContent = text;
+    m.appendChild(el);
+    m.scrollTop = m.scrollHeight;
+    return el;
+  }
+  function fcSend(ev) {
+    ev.preventDefault();
+    var input = document.getElementById('fc-text');
+    var btn = document.getElementById('fc-send');
+    var msg = input.value.trim();
+    if (!msg) return false;
+    fcAdd('user', msg);
+    fcHistory.push({role: 'user', text: msg});
+    input.value = '';
+    btn.disabled = true;
+    var typing = fcAdd('bot typing', 'Planning…');
+    var body = new URLSearchParams();
+    body.set('message', msg);
+    body.set('history', JSON.stringify(fcHistory.slice(-8)));
+    fetch('/sites/{{ site.id }}/chat', {method:'POST', credentials:'same-origin',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: body.toString()})
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.ok) { typing.remove(); btn.disabled = false;
+          fcAdd('bot err', d.reply || 'Something went wrong.'); return; }
+        var tries = 0;
+        var iv = setInterval(function () {
+          tries++;
+          fetch('/sites/{{ site.id }}/chat-status?run_id=' + d.run_id, {credentials:'same-origin'})
+            .then(function (r) { return r.json(); })
+            .then(function (s) {
+              if (s.status === 'running') {
+                if (s.label) typing.textContent = s.label;
+                if (tries > 120) { clearInterval(iv); typing.remove(); btn.disabled = false;
+                  fcAdd('bot err', 'This is taking too long — check the site page in a minute.'); }
+                return;
+              }
+              clearInterval(iv);
+              typing.remove();
+              btn.disabled = false;
+              var cls = s.status === 'completed' ? 'bot' : 'bot err';
+              fcAdd(cls, s.reply || 'Done.');
+              fcHistory.push({role: 'assistant', text: (s.reply || '').slice(0, 300)});
+            })
+            .catch(function () {});
+        }, 1500);
+      })
+      .catch(function () { typing.remove(); btn.disabled = false;
+        fcAdd('bot err', 'Network hiccup — try again.'); });
+    return false;
+  }
+</script>
 <script>
   (function () {
     var STATE_LABEL = {pending:'Waiting', active:'Working', done:'Done', failed:'Failed'};

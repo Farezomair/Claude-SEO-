@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "audit-progress-68"
+BUILD = "fix-chat-69"
 
 
 @app.get("/version")
@@ -1345,6 +1345,48 @@ def run_context_links_now(site_id: int, request: Request, db: Session = Depends(
         db.refresh(run)
         start_context_links_async(site_id, run.id, conn, pid, links.get(pid, ""), p.get("title", ""))
     return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
+
+
+@app.post("/sites/{site_id}/chat")
+def site_chat(site_id: int, request: Request, message: str = Form(...),
+              history: str = Form("[]"), db: Session = Depends(get_db)):
+    """Fix Chat: turn an owner's message into executed text fixes on THIS site.
+    Strictly scoped — the only capability behind it is exact-text replacement on
+    this site's own pages; anything else is refused by the planner."""
+    if not current_user(request):
+        return JSONResponse({"error": "auth"}, status_code=401)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return JSONResponse({"error": "unknown site"}, status_code=404)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return JSONResponse({"ok": False,
+                             "reply": "I can't edit this site yet — connect WordPress in Settings first."})
+    try:
+        hist = json.loads(history or "[]")
+        if not isinstance(hist, list):
+            hist = []
+    except Exception:
+        hist = []
+    run = JobRun(site_id=site_id, kind="chatfix", status="running",
+                 summary="", progress_label="Planning…")
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    from .chat_fixer import start_chat_fix_async
+    start_chat_fix_async(site_id, run.id, conn, message.strip()[:800], hist)
+    return JSONResponse({"ok": True, "run_id": run.id})
+
+
+@app.get("/sites/{site_id}/chat-status")
+def site_chat_status(site_id: int, run_id: int, request: Request, db: Session = Depends(get_db)):
+    if not current_user(request):
+        return JSONResponse({"error": "auth"}, status_code=401)
+    run = db.get(JobRun, run_id)
+    if not run or run.site_id != site_id or run.kind != "chatfix":
+        return JSONResponse({"error": "unknown run"}, status_code=404)
+    return JSONResponse({"status": run.status, "reply": run.summary or "",
+                         "label": run.progress_label or ""})
 
 
 @app.post("/sites/{site_id}/track-ranks")
