@@ -371,7 +371,10 @@
 <div class="fc-dock" id="fc-dock" style="display:none;">
   <div class="fc-head">
     <div><b>Fix Chat</b><span class="fc-sub">changes {{ site.name }} only — nothing else</span></div>
-    <button type="button" class="fc-x" onclick="fcToggle()">×</button>
+    <div style="display:flex; align-items:center; gap:6px;">
+      <button type="button" class="fc-clear" onclick="fcClear()" title="Start a fresh conversation">Clear</button>
+      <button type="button" class="fc-x" onclick="fcToggle()">×</button>
+    </div>
   </div>
   <div class="fc-msgs" id="fc-msgs">
     <div class="fc-msg bot">Tell me the fix and I'll apply it across the site — e.g. <i>"the real phone is 208 856 3233, update it everywhere"</i> or <i>"our license number is RCE 69511, replace the placeholder"</i>. Every change is snapshotted and re-checked by the next audit.</div>
@@ -387,47 +390,58 @@
     background:var(--side-bg); color:#fff; border:none; border-radius:999px; padding:13px 20px; font:inherit;
     font-size:14px; font-weight:700; cursor:pointer; box-shadow:0 10px 30px rgba(16,24,40,.3); }
   .fc-fab:hover { transform:translateY(-1px); }
-  .fc-dock { position:fixed; right:22px; bottom:22px; z-index:950; width:390px; max-width:calc(100vw - 30px);
+  .fc-dock { position:fixed; right:22px; bottom:22px; z-index:950; width:640px; max-width:calc(100vw - 30px);
     background:#fff; border:1px solid var(--border); border-radius:18px; box-shadow:0 18px 50px rgba(16,24,40,.25);
     display:flex; flex-direction:column; overflow:hidden; }
-  .fc-head { background:var(--side-bg); color:#fff; padding:13px 16px; display:flex; align-items:center; justify-content:space-between; }
-  .fc-head .fc-sub { display:block; font-size:11px; font-weight:500; color:#aab3d0; }
-  .fc-x { background:none; border:none; color:#aab3d0; font-size:20px; cursor:pointer; line-height:1; }
-  .fc-msgs { padding:14px; display:flex; flex-direction:column; gap:9px; overflow-y:auto; max-height:44vh; min-height:120px; background:var(--panel-2); }
-  .fc-msg { max-width:85%; padding:9px 13px; border-radius:13px; font-size:13px; line-height:1.5; white-space:pre-wrap; }
+  .fc-head { background:var(--side-bg); color:#fff; padding:14px 18px; display:flex; align-items:center; justify-content:space-between; }
+  .fc-head .fc-sub { display:block; font-size:11.5px; font-weight:500; color:#aab3d0; }
+  .fc-x { background:none; border:none; color:#aab3d0; font-size:22px; cursor:pointer; line-height:1; }
+  .fc-clear { background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.15); color:#c7cfe8;
+    font:inherit; font-size:11.5px; font-weight:600; border-radius:8px; padding:4px 11px; cursor:pointer; }
+  .fc-clear:hover { background:rgba(255,255,255,.15); color:#fff; }
+  .fc-msgs { padding:16px; display:flex; flex-direction:column; gap:10px; overflow-y:auto;
+    height:60vh; max-height:640px; min-height:280px; background:var(--panel-2); }
+  .fc-msg { max-width:82%; padding:11px 15px; border-radius:14px; font-size:14px; line-height:1.55; white-space:pre-wrap; }
   .fc-msg.user { align-self:flex-end; background:var(--accent); color:#fff; border-bottom-right-radius:4px; }
   .fc-msg.bot { align-self:flex-start; background:#fff; border:1px solid var(--border); border-bottom-left-radius:4px; }
   .fc-msg.bot.err { border-color:#f7c6d0; color:#b42346; }
   .fc-msg.typing { color:var(--muted); font-style:italic; }
-  .fc-input { display:flex; gap:8px; padding:11px; border-top:1px solid var(--border); background:#fff; align-items:flex-end; }
-  .fc-input textarea { flex:1; min-width:0; padding:10px 13px; font-size:13px; resize:none; line-height:1.45;
-    max-height:120px; overflow-y:auto; }
+  .fc-input { display:flex; gap:8px; padding:13px; border-top:1px solid var(--border); background:#fff; align-items:flex-end; }
+  .fc-input textarea { flex:1; min-width:0; padding:11px 14px; font-size:14px; resize:none; line-height:1.5;
+    max-height:170px; overflow-y:auto; }
 </style>
 <script>
+  // The conversation is remembered per site (localStorage): a refresh restores
+  // the transcript, and a fix that was still running is picked back up.
+  var FC_KEY = 'fc-hist-{{ site.id }}';
+  var FC_PEND = 'fc-pend-{{ site.id }}';
+  var fcStore = [];
+  try { fcStore = JSON.parse(localStorage.getItem(FC_KEY) || '[]') || []; } catch (e) { fcStore = []; }
   var fcHistory = [];
-  // Enter sends, Shift+Enter inserts a new line; the box grows as you type.
-  (function () {
-    var ta = document.getElementById('fc-text');
-    if (!ta) return;
-    ta.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        var f = document.getElementById('fc-form');
-        if (f.requestSubmit) { f.requestSubmit(); }
-        else { f.dispatchEvent(new Event('submit', {cancelable: true})); }
-      }
-    });
-    ta.addEventListener('input', function () {
-      ta.style.height = 'auto';
-      ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
-    });
-  })();
+
+  function fcRemember(role, text) {
+    fcStore.push({role: role, text: text});
+    fcStore = fcStore.slice(-40);
+    try { localStorage.setItem(FC_KEY, JSON.stringify(fcStore)); } catch (e) {}
+    if (role === 'user') fcHistory.push({role: 'user', text: text});
+    if (role === 'assistant') fcHistory.push({role: 'assistant', text: text.slice(0, 300)});
+  }
+  function fcClear() {
+    fcStore = []; fcHistory = [];
+    try { localStorage.removeItem(FC_KEY); localStorage.removeItem(FC_PEND); } catch (e) {}
+    var m = document.getElementById('fc-msgs');
+    while (m.children.length > 1) { m.removeChild(m.lastChild); }  // keep the intro bubble
+  }
   function fcToggle() {
     var d = document.getElementById('fc-dock'), f = document.getElementById('fc-fab');
     var open = d.style.display !== 'none';
     d.style.display = open ? 'none' : 'flex';
     f.style.display = open ? 'inline-flex' : 'none';
-    if (!open) document.getElementById('fc-text').focus();
+    if (!open) {
+      var m = document.getElementById('fc-msgs');
+      m.scrollTop = m.scrollHeight;
+      document.getElementById('fc-text').focus();
+    }
   }
   function fcAdd(cls, text) {
     var m = document.getElementById('fc-msgs');
@@ -438,6 +452,36 @@
     m.scrollTop = m.scrollHeight;
     return el;
   }
+  function fcPoll(runId, typing) {
+    var btn = document.getElementById('fc-send');
+    var tries = 0;
+    var iv = setInterval(function () {
+      tries++;
+      fetch('/sites/{{ site.id }}/chat-status?run_id=' + runId, {credentials:'same-origin'})
+        .then(function (r) { return r.json(); })
+        .then(function (s) {
+          if (s.status === 'running') {
+            if (s.label) typing.textContent = s.label;
+            if (tries > 200) { clearInterval(iv); typing.remove(); btn.disabled = false;
+              try { localStorage.removeItem(FC_PEND); } catch (e) {}
+              fcAdd('bot err', 'This is taking too long — check the site page in a minute.'); }
+            return;
+          }
+          clearInterval(iv);
+          typing.remove();
+          btn.disabled = false;
+          try { localStorage.removeItem(FC_PEND); } catch (e) {}
+          if (s.status === 'completed') {
+            fcAdd('bot', s.reply || 'Done.');
+            fcRemember('assistant', s.reply || 'Done.');
+          } else {
+            fcAdd('bot err', s.reply || 'That failed — try again.');
+            fcRemember('error', s.reply || 'That failed — try again.');
+          }
+        })
+        .catch(function () {});
+    }, 1500);
+  }
   function fcSend(ev) {
     ev.preventDefault();
     var input = document.getElementById('fc-text');
@@ -445,7 +489,7 @@
     var msg = input.value.trim();
     if (!msg) return false;
     fcAdd('user', msg);
-    fcHistory.push({role: 'user', text: msg});
+    fcRemember('user', msg);
     input.value = '';
     input.style.height = 'auto';
     btn.disabled = true;
@@ -459,32 +503,42 @@
       .then(function (d) {
         if (!d.ok) { typing.remove(); btn.disabled = false;
           fcAdd('bot err', d.reply || 'Something went wrong.'); return; }
-        var tries = 0;
-        var iv = setInterval(function () {
-          tries++;
-          fetch('/sites/{{ site.id }}/chat-status?run_id=' + d.run_id, {credentials:'same-origin'})
-            .then(function (r) { return r.json(); })
-            .then(function (s) {
-              if (s.status === 'running') {
-                if (s.label) typing.textContent = s.label;
-                if (tries > 120) { clearInterval(iv); typing.remove(); btn.disabled = false;
-                  fcAdd('bot err', 'This is taking too long — check the site page in a minute.'); }
-                return;
-              }
-              clearInterval(iv);
-              typing.remove();
-              btn.disabled = false;
-              var cls = s.status === 'completed' ? 'bot' : 'bot err';
-              fcAdd(cls, s.reply || 'Done.');
-              fcHistory.push({role: 'assistant', text: (s.reply || '').slice(0, 300)});
-            })
-            .catch(function () {});
-        }, 1500);
+        try { localStorage.setItem(FC_PEND, String(d.run_id)); } catch (e) {}
+        fcPoll(d.run_id, typing);
       })
       .catch(function () { typing.remove(); btn.disabled = false;
         fcAdd('bot err', 'Network hiccup — try again.'); });
     return false;
   }
+  // Restore the remembered conversation + resume an in-flight fix on load.
+  (function () {
+    fcStore.forEach(function (e) {
+      fcAdd(e.role === 'user' ? 'user' : (e.role === 'error' ? 'bot err' : 'bot'), e.text);
+      if (e.role === 'user') fcHistory.push({role: 'user', text: e.text});
+      if (e.role === 'assistant') fcHistory.push({role: 'assistant', text: e.text.slice(0, 300)});
+    });
+    var pend = null;
+    try { pend = localStorage.getItem(FC_PEND); } catch (e) {}
+    if (pend) {
+      fcToggle();  // open the dock so the result is seen
+      document.getElementById('fc-send').disabled = true;
+      fcPoll(pend, fcAdd('bot typing', 'Still working on your last fix…'));
+    }
+    var ta = document.getElementById('fc-text');
+    if (!ta) return;
+    ta.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        var f = document.getElementById('fc-form');
+        if (f.requestSubmit) { f.requestSubmit(); }
+        else { f.dispatchEvent(new Event('submit', {cancelable: true})); }
+      }
+    });
+    ta.addEventListener('input', function () {
+      ta.style.height = 'auto';
+      ta.style.height = Math.min(ta.scrollHeight, 170) + 'px';
+    });
+  })();
 </script>
 <script>
   (function () {
