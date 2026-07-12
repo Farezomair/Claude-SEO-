@@ -376,8 +376,8 @@
   <div class="fc-msgs" id="fc-msgs">
     <div class="fc-msg bot">Tell me the fix and I'll apply it across the site — e.g. <i>"the real phone is 208 856 3233, update it everywhere"</i> or <i>"our license number is RCE 69511, replace the placeholder"</i>. Every change is snapshotted and re-checked by the next audit.</div>
   </div>
-  <form class="fc-input" onsubmit="return fcSend(event)">
-    <input type="text" id="fc-text" maxlength="800" placeholder="Describe the fix for this website…" autocomplete="off" required>
+  <form class="fc-input" id="fc-form" onsubmit="return fcSend(event)">
+    <textarea id="fc-text" rows="1" maxlength="800" placeholder="Describe the fix for this website… (Enter to send · Shift+Enter for a new line)" required></textarea>
     <button class="btn small" type="submit" id="fc-send">Send</button>
   </form>
 </div>
@@ -399,11 +399,29 @@
   .fc-msg.bot { align-self:flex-start; background:#fff; border:1px solid var(--border); border-bottom-left-radius:4px; }
   .fc-msg.bot.err { border-color:#f7c6d0; color:#b42346; }
   .fc-msg.typing { color:var(--muted); font-style:italic; }
-  .fc-input { display:flex; gap:8px; padding:11px; border-top:1px solid var(--border); background:#fff; }
-  .fc-input input { flex:1; min-width:0; padding:10px 13px; font-size:13px; }
+  .fc-input { display:flex; gap:8px; padding:11px; border-top:1px solid var(--border); background:#fff; align-items:flex-end; }
+  .fc-input textarea { flex:1; min-width:0; padding:10px 13px; font-size:13px; resize:none; line-height:1.45;
+    max-height:120px; overflow-y:auto; }
 </style>
 <script>
   var fcHistory = [];
+  // Enter sends, Shift+Enter inserts a new line; the box grows as you type.
+  (function () {
+    var ta = document.getElementById('fc-text');
+    if (!ta) return;
+    ta.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        var f = document.getElementById('fc-form');
+        if (f.requestSubmit) { f.requestSubmit(); }
+        else { f.dispatchEvent(new Event('submit', {cancelable: true})); }
+      }
+    });
+    ta.addEventListener('input', function () {
+      ta.style.height = 'auto';
+      ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+    });
+  })();
   function fcToggle() {
     var d = document.getElementById('fc-dock'), f = document.getElementById('fc-fab');
     var open = d.style.display !== 'none';
@@ -429,6 +447,7 @@
     fcAdd('user', msg);
     fcHistory.push({role: 'user', text: msg});
     input.value = '';
+    input.style.height = 'auto';
     btn.disabled = true;
     var typing = fcAdd('bot typing', 'Planning…');
     var body = new URLSearchParams();
