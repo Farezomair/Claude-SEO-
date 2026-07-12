@@ -68,7 +68,7 @@ def _pick_pages(client, start_url):
     return pages
 
 
-def analyze_site_content(start_url: str, site_name: str) -> tuple[list[dict], int]:
+def analyze_site_content(start_url: str, site_name: str, progress_cb=None) -> tuple[list[dict], int]:
     """Return (issues, pages_examined). pages_examined is the count of real content
     pages actually judged — the scorer divides content/GEO penalty by it so the
     score reflects average per-page quality, not how many pages we happened to read."""
@@ -76,7 +76,13 @@ def analyze_site_content(start_url: str, site_name: str) -> tuple[list[dict], in
     examined = 0
     headers = {"User-Agent": USER_AGENT}
     with httpx.Client(follow_redirects=True, timeout=REQUEST_TIMEOUT, headers=headers) as client:
-        for url in _pick_pages(client, start_url):
+        _target_pages = _max_pages()
+        for _pi, url in enumerate(_pick_pages(client, start_url), start=1):
+            if progress_cb:
+                try:
+                    progress_cb(_pi, _target_pages)
+                except Exception:
+                    pass
             res = _fetch(client, url)
             if not res:
                 continue

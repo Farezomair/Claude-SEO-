@@ -12,20 +12,36 @@ from .content_analyzer import analyze_site_content
 from .crawler import crawl_site
 from .database import SessionLocal
 from .gsc import gsc_findings
-from .models import Audit, Finding, RunLog, Site
+from .models import Audit, Finding, JobRun, RunLog, Site
 from .perf import analyze_performance
 from .routing import classify
 from .scoring import MEASURED, compute as compute_score
 
 
-def _run_audit(site_id: int, audit_id: int, start_url: str) -> None:
+def _run_audit(site_id: int, audit_id: int, start_url: str, progress_run_id: int | None = None) -> None:
     db = SessionLocal()
     try:
         audit = db.get(Audit, audit_id)
         if audit is None:
             return
+
+        # Determinate audit progress (0-100) on the weekly run, so the UI can
+        # fill bars with the level actually attained instead of an endless sweep.
+        prun = db.get(JobRun, progress_run_id) if progress_run_id else None
+
+        def _prog(pct, label):
+            if not prun:
+                return
+            try:
+                prun.progress_done, prun.progress_total, prun.progress_label = int(pct), 100, label
+                db.commit()
+            except Exception:
+                db.rollback()
+
+        _prog(2, "starting the crawl")
         try:
-            result = crawl_site(start_url)
+            result = crawl_site(start_url, progress_cb=lambda d, t: _prog(
+                2 + int(58 * d / max(1, t)), f"crawling page {d} of {t}"))
         except Exception as exc:  # never let the thread die silently
             audit.status = "failed"
             audit.summary = f"Audit failed: {exc.__class__.__name__}: {exc}"
@@ -44,12 +60,17 @@ def _run_audit(site_id: int, audit_id: int, start_url: str) -> None:
         measured = set(MEASURED)
         site = db.get(Site, site_id)
         content_pages = 1
+        _prog(60, "deep-reading content (E-E-A-T & AI citability)")
         try:
-            _c_issues, content_pages = analyze_site_content(start_url, site.name if site else "")
+            _c_issues, content_pages = analyze_site_content(
+                start_url, site.name if site else "",
+                progress_cb=lambda d, t: _prog(60 + int(30 * d / max(1, t)),
+                                               f"deep-reading content \u2014 page {d} of {t}"))
             all_issues += _c_issues
             content_pages = max(1, content_pages)
         except Exception:
             content_pages = 1
+        _prog(92, "checking keyword targeting & rendered titles")
         try:
             from .keyword_brain import targeting_findings
             all_issues += targeting_findings(site_id, start_url)
@@ -60,6 +81,7 @@ def _run_audit(site_id: int, audit_id: int, start_url: str) -> None:
             all_issues += title_conflict_findings(site_id, start_url)
         except Exception:
             pass
+        _prog(96, "measuring Core Web Vitals")
         try:
             perf_issues, perf_ok = analyze_performance(start_url)
             all_issues += perf_issues
@@ -107,6 +129,7 @@ def _run_audit(site_id: int, audit_id: int, start_url: str) -> None:
         except Exception:
             audit.narrative = ""
 
+        _prog(100, "scoring")
         s = result["stats"]
         audit.status = "completed"
         audit.summary = (

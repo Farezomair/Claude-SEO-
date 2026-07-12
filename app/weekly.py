@@ -85,7 +85,7 @@ def run_weekly(site_id: int, weekly_run_id: int) -> None:
         db.add(audit)
         db.commit()
         db.refresh(audit)
-        _run_audit(site_id, audit.id, site.url)  # synchronous
+        _run_audit(site_id, audit.id, site.url, progress_run_id=weekly_run_id)  # synchronous
         issue_count = db.query(Finding).filter(Finding.audit_id == audit.id).count()
         steps.append(f"audited ({issue_count} finding(s))")
 

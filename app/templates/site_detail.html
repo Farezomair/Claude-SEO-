@@ -375,10 +375,11 @@
 
     function esc(s){ var d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML; }
 
-    function lvBar(name, state, lane) {
+    function lvBar(name, state, lane, pct) {
       var dot = lane ? '<span class="lv-dot" style="background:' + (lane === 'auto' ? '#34d399' : '#0284c7') + '"></span>' : '';
       var w = state === 'done' ? '100%' : (state === 'active' ? '42%' : '0%');
       var anim = state === 'active' ? 'anim' : '';
+      if (state === 'active' && pct != null) { w = pct + '%'; anim = ''; }
       var tick = state === 'done' ? '✓' : (state === 'failed' ? '!' : '');
       var tcol = state === 'failed' ? '#dc4664' : '#0a9b6d';
       return '<div class="lv-row ' + (state === 'pending' ? 'lv-pending' : '') + '">'
@@ -393,8 +394,11 @@
       if (!d.running) { box.style.display = 'none'; return; }
       if (d.phase === 'audit') {
         var caps = d.audit_caps || [];
-        box.innerHTML = '<p class="lv-head">Auditing — scanning ' + caps.length + ' capabilities</p>'
-          + '<div class="lv-grid">' + caps.map(function (c) { return lvBar(c.label, c.state, null); }).join('') + '</div>';
+        var pct = (d.fix_total ? Math.min(100, Math.round((d.fix_done || 0) / d.fix_total * 100)) : null);
+        var head = 'Auditing — scanning ' + caps.length + ' capabilities';
+        if (pct != null) { head += ' · ' + pct + '%' + (d.fix_label ? ' — ' + d.fix_label : ''); }
+        box.innerHTML = '<p class="lv-head">' + esc(head) + '</p>'
+          + '<div class="lv-grid">' + caps.map(function (c) { return lvBar(c.label, c.state, null, pct); }).join('') + '</div>';
         box.style.display = 'block';
       } else if (['route', 'fix', 'report', 'done'].indexOf(d.phase) >= 0 && (d.doers || []).length) {
         var act = d.doers.filter(function (x) { return x.state === 'active'; }).length;
@@ -439,6 +443,12 @@
           if (lab) lab.textContent = (d.fix_done || 0) + '/' + d.fix_total;
           var bar = el.querySelector('.bar > i');
           if (bar) { bar.style.animation = 'none'; bar.style.width = Math.round((d.fix_done || 0) / d.fix_total * 100) + '%'; }
+          if (sub && d.fix_label) sub.textContent = d.fix_label;
+        } else if (s.key === 'audit' && s.state === 'active' && d.fix_total) {
+          var apct = Math.min(100, Math.round((d.fix_done || 0) / d.fix_total * 100));
+          if (lab) lab.textContent = apct + '%';
+          var abar = el.querySelector('.bar > i');
+          if (abar) { abar.style.animation = 'none'; abar.style.width = apct + '%'; }
           if (sub && d.fix_label) sub.textContent = d.fix_label;
         } else {
           if (lab) lab.textContent = STATE_LABEL[s.state] || '';

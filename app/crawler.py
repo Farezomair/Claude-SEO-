@@ -232,7 +232,7 @@ def _page_title(soup) -> str:
     return (t.get_text() or "").strip() if t else ""
 
 
-def crawl_site(start_url: str) -> dict:
+def crawl_site(start_url: str, progress_cb=None) -> dict:
     """Crawl ``start_url`` read-only. Returns {"issues": [...], "stats": {...}}."""
     if not start_url.startswith(("http://", "https://")):
         start_url = "https://" + start_url
@@ -274,6 +274,11 @@ def crawl_site(start_url: str) -> dict:
                 continue
 
             pages_crawled += 1
+            if progress_cb:
+                try:
+                    progress_cb(pages_crawled, max_pages)
+                except Exception:
+                    pass
             if resp.status_code >= 400:
                 issues.append(_issue("broken_page", "high", page_url,
                                      f"Page returned HTTP {resp.status_code}"))
