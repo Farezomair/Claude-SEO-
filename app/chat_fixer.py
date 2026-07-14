@@ -72,6 +72,7 @@ Your powers, all limited to this site:
 2. pattern — a conservative regex replacement/removal across pages (for things like "remove the posted date everywhere" where exact strings vary). Replacement may be empty to remove.
 3. approve / reject — decide a PENDING approval from the queue below, by its exact id.
 4. resolve_task — mark a "needs your attention" task from the list below as done, ONLY when the owner's message actually supplies/fixes what it asked for.
+6. scrub_text — swap a fabricated string that the THEME hardcodes into the rendered HTML (e.g. a "Or call us: (208) 555-0123" CTA baked into the template, not stored in any editable page). Rewrites the FINAL served HTML site-wide. Params: {{"rules": [{{"find": "exact old string", "replace": "exact new string"}}]}}. IMPORTANT: whenever you fix a phone / license / address that appears in the rendered page, ALSO add the same old->new as a scrub_text rule (belt-and-suspenders) so it's fixed even where a theme or plugin hardcodes it and a content edit can't reach.
 5. scrub_schema — fix fabricated JSON-LD that lives in the page HEAD (injected by another plugin/theme, so text replace can't reach it): remove self-serving aggregateRating star ratings, and fix a fake streetAddress. Params: {{"strip_reviews": true/false, "bad_street": "the fake street value e.g. Meridian", "street_mode": "remove" (service-area, no street) or "replace", "street_value": "real street if replacing"}}. Use this for "remove the self-serving reviews" and for the fake-address options.
 
 HOW TO DECIDE — pick ONE of three responses:
@@ -107,7 +108,8 @@ Respond with ONLY a JSON object:
     {{"op": "approve", "id": 12, "publish": true}},
     {{"op": "reject", "id": 13}},
     {{"op": "resolve_task", "id": 44}},
-    {{"op": "scrub_schema", "strip_reviews": true, "bad_street": "Meridian", "street_mode": "remove", "street_value": ""}}
+    {{"op": "scrub_schema", "strip_reviews": true, "bad_street": "Meridian", "street_mode": "remove", "street_value": ""}},
+    {{"op": "scrub_text", "rules": [{{"find": "(208) 555-0123", "replace": "(208) 856-3233"}}]}}
   ]}}
 Use EITHER options OR operations, not both (options wins if you're unsure). Both may be empty for a plain reply/question. Max {MAX_OPS} operations, 4 options."""
     response = _get_client().messages.create(
@@ -143,6 +145,14 @@ Use EITHER options OR operations, not both (options wins if you're unsure). Both
                         "bad_street": str(r.get("bad_street", ""))[:120],
                         "street_mode": "replace" if r.get("street_mode") == "replace" else "remove",
                         "street_value": str(r.get("street_value", ""))[:200]})
+        elif op == "scrub_text":
+            rules = []
+            for rr in (r.get("rules") or [])[:20]:
+                f = str(rr.get("find", "")).strip()
+                if f and len(f) >= 4:
+                    rules.append({"find": f[:200], "replace": str(rr.get("replace", ""))[:200]})
+            if rules:
+                ops.append({"op": "scrub_text", "rules": rules})
     options = []
     for o in (data.get("options") or [])[:4]:
         lab = str(o.get("label", "")).strip()
@@ -241,6 +251,19 @@ def run_chat_fix(site_id: int, run_id: int, conn: dict, message: str, history: l
                            street_value=o["street_value"])
             db.refresh(hj)
             results.append(hj.summary or "head schema scrubbed")
+
+        # --- output-buffer text scrub (theme-hardcoded strings; Bridge v10) ---
+        for o in [o for o in ops if o["op"] == "scrub_text"]:
+            _label("Rewriting theme-hardcoded text in the live HTML…")
+            tj = JobRun(site_id=site_id, kind="textscrub", status="running",
+                        summary="Rewriting hardcoded text…")
+            db.add(tj)
+            db.commit()
+            db.refresh(tj)
+            from .head_schema_agent import run_text_scrub
+            run_text_scrub(site_id, tj.id, conn, o["rules"])
+            db.refresh(tj)
+            results.append(tj.summary or "text scrub applied")
 
         # --- text/pattern ops across EVERY surface: pages AND posts, in both the
         # theme render source (_meridian_body via the Bridge) AND WordPress

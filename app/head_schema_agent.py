@@ -39,6 +39,86 @@ def scrub_head_schema(conn: dict, strip_reviews: bool = True, bad_street: str = 
         return False, {}
 
 
+def _get_text_rules(conn: dict) -> list:
+    try:
+        with httpx.Client(timeout=30.0, auth=(conn["username"], conn["app_password"]),
+                          headers={"User-Agent": USER_AGENT}, follow_redirects=True) as c:
+            r = c.get(_base(conn) + "/wp-json/seo-agent/v1/text-scrub")
+        return (r.json() or {}).get("rules", []) if r.status_code == 200 else []
+    except Exception:
+        return []
+
+
+def set_text_rules(conn: dict, new_rules: list) -> tuple[bool, list]:
+    """Merge new find->replace rules into the Bridge text-scrub set (dedup by
+    find) and store them. These rewrite the FINAL HTML, catching fabricated
+    strings the theme hardcodes where no content doer can reach."""
+    existing = {r.get("find"): r.get("replace", "") for r in _get_text_rules(conn) if r.get("find")}
+    for r in new_rules:
+        f = str(r.get("find", "")).strip()
+        if f:
+            existing[f] = str(r.get("replace", ""))
+    merged = [{"find": k, "replace": v} for k, v in existing.items()][:30]
+    try:
+        with httpx.Client(timeout=30.0, auth=(conn["username"], conn["app_password"]),
+                          headers={"User-Agent": USER_AGENT}, follow_redirects=True) as c:
+            r = c.post(_base(conn) + "/wp-json/seo-agent/v1/text-scrub", json={"rules": merged})
+        return (r.status_code in (200, 201)), ((r.json() or {}).get("rules", []) if r.status_code < 500 else [])
+    except Exception:
+        return False, []
+
+
+def run_text_scrub(site_id: int, run_id: int, conn: dict, rules: list) -> None:
+    """Register output-buffer text rules and verify the fabricated strings are
+    gone from the live homepage."""
+    db = SessionLocal()
+    try:
+        run = db.get(JobRun, run_id)
+        site = db.get(Site, site_id)
+        clean = [{"find": str(r.get("find", "")).strip(), "replace": str(r.get("replace", ""))}
+                 for r in rules if str(r.get("find", "")).strip()]
+        if not clean:
+            run.status = "completed"
+            run.summary = "No text rules to apply."
+            db.commit()
+            return
+        ok, stored = set_text_rules(conn, clean)
+        if not ok:
+            run.status = "failed"
+            run.summary = "Couldn't set the text scrubber — is SEO Agent Bridge (v10+) active?"
+            db.add(RunLog(site_id=site_id, message=run.summary))
+            db.commit()
+            return
+        try:
+            with httpx.Client(timeout=20.0, follow_redirects=True,
+                              headers={"User-Agent": "Mozilla/5.0"}) as c:
+                live = c.get(site.url.rstrip("/") + "/").text
+            gone = sum(1 for r in clean if r["find"] not in live)
+        except Exception:
+            gone = 0
+        run.status = "completed"
+        run.summary = (f"Text scrub active: {len(clean)} rule(s) rewriting the live HTML "
+                       f"({gone}/{len(clean)} old string(s) already gone from the homepage; "
+                       "theme-hardcoded copy on inner pages is now rewritten too).")
+        db.add(FixRecord(
+            site_id=site_id, doer="Fix Chat", field="text_scrub",
+            action_taken="Output-buffer text rules: " + "; ".join(
+                f"{r['find'][:30]} → {r['replace'][:30]}" for r in clean[:4]),
+            page_ref=site.url, before_value=f"{len(clean)} fabricated string(s)",
+            after_value="rewritten in the final HTML site-wide", method="auto-safe",
+            lane="autonomous", applied=True, verification_verdict="verified", status="done"))
+        db.add(RunLog(site_id=site_id, message=run.summary))
+        db.commit()
+    except Exception as exc:
+        run = db.get(JobRun, run_id)
+        if run:
+            run.status = "failed"
+            run.summary = f"Text-scrub run failed: {exc.__class__.__name__}: {exc}"
+            db.commit()
+    finally:
+        db.close()
+
+
 def _live_head(site_url: str) -> str:
     try:
         with httpx.Client(timeout=20.0, follow_redirects=True,

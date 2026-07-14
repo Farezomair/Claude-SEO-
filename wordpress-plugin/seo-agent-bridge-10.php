@@ -207,14 +207,26 @@ add_action('template_redirect', function () {
     if (is_admin() || is_feed()) { return; }
     $do_title = get_option('seo_agent_title_override');
     $do_scrub = get_option('seo_agent_scrub_reviews') || get_option('seo_agent_scrub_bad_street');
-    if (!$do_title && !$do_scrub) { return; }
+    $text_rules = json_decode((string) get_option('seo_agent_text_rules', ''), true);
+    $do_text = is_array($text_rules) && count($text_rules) > 0;
+    if (!$do_title && !$do_scrub && !$do_text) { return; }
     $t = $do_title ? seo_agent_resolved_title() : '';
-    ob_start(function ($html) use ($t, $do_scrub) {
+    ob_start(function ($html) use ($t, $do_scrub, $do_text, $text_rules) {
         if ($t !== '') {
             $html = preg_replace('#<title[^>]*>.*?</title>#si',
                                  '<title>' . esc_html($t) . '</title>', $html, 1);
         }
         if ($do_scrub) { $html = seo_agent_scrub_html($html); }
+        // Universal text scrub: swap fabricated strings (a theme-hardcoded phone,
+        // a placeholder license) in the FINAL HTML, wherever the theme printed
+        // them — the surface no content doer can reach. Exact str_replace only.
+        if ($do_text) {
+            foreach ($text_rules as $rule) {
+                if (!empty($rule['find'])) {
+                    $html = str_replace((string) $rule['find'], (string) ($rule['replace'] ?? ''), $html);
+                }
+            }
+        }
         return $html;
     });
 }, 1);
@@ -303,6 +315,16 @@ add_action('rest_api_init', function () {
               'permission_callback' => function () { return current_user_can('manage_options'); }),
     ));
 
+    // --- NEW in v1.8: universal output-buffer text scrub (theme-hardcoded strings) ---
+    register_rest_route('seo-agent/v1', '/text-scrub', array(
+        array('methods' => 'GET', 'callback' => function () {
+                $r = json_decode((string) get_option('seo_agent_text_rules', ''), true);
+                return array('rules' => is_array($r) ? $r : array());
+              }, 'permission_callback' => function () { return current_user_can('manage_options'); }),
+        array('methods' => 'POST', 'callback' => 'seo_agent_text_set',
+              'permission_callback' => function () { return current_user_can('manage_options'); }),
+    ));
+
     // --- NEW in v1.7: rendered-title override toggle ---
     register_rest_route('seo-agent/v1', '/title-override', array(
         array('methods' => 'GET', 'callback' => function () {
@@ -386,6 +408,23 @@ function seo_agent_head_set($request) {
     if ($img !== null) { update_option('seo_agent_og_image', esc_url_raw((string) $img)); }
     do_action('litespeed_purge_all');
     return seo_agent_head_state();
+}
+
+function seo_agent_text_set($request) {
+    $rules = $request->get_param('rules');
+    $clean = array();
+    if (is_array($rules)) {
+        foreach ($rules as $rule) {
+            if (!empty($rule['find'])) {
+                $clean[] = array('find' => (string) $rule['find'],
+                                 'replace' => (string) (isset($rule['replace']) ? $rule['replace'] : ''));
+            }
+            if (count($clean) >= 30) { break; }
+        }
+    }
+    update_option('seo_agent_text_rules', wp_json_encode($clean));
+    do_action('litespeed_purge_all');
+    return array('rules' => $clean);
 }
 
 function seo_agent_scrub_state() {

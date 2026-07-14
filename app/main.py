@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "head-scrub-75"
+BUILD = "text-scrub-76"
 
 
 @app.get("/version")
@@ -316,7 +316,7 @@ def _pipeline_state(run, report_id=None) -> dict:
 
 _DOER_JOB_KINDS = ["elementor", "image", "alttext", "schema", "schemaclean", "technical",
                    "headmeta", "robots", "perf", "webp", "linking", "ctxlinks", "redirects", "hrefs",
-                   "archives", "titlefix", "headscrub", "pagedraft"]
+                   "archives", "titlefix", "headscrub", "textscrub", "pagedraft"]
 _STATE_PRIORITY = {"active": 3, "failed": 2, "done": 1, "pending": 0}
 # Doer runs execute on in-process daemon threads, so any JobRun still 'running'
 # from BEFORE this process booted is a ghost (a redeploy killed its thread) — the
@@ -1084,6 +1084,19 @@ def bridge_selftest(site_id: int, request: Request, db: Session = Depends(get_db
                          "reverted": _post("robots", {"extra": ""}).get("extra") == ""}
     except Exception as e:
         out["robots"] = {"error": f"{e.__class__.__name__}: {e}"}
+
+    # TEXT SCRUB (v10): read rules, write them back unchanged (endpoint liveness).
+    try:
+        with httpx.Client(timeout=30.0, auth=auth, follow_redirects=True) as c:
+            rb = c.get(f"{base}/wp-json/seo-agent/v1/text-scrub")
+        if rb.status_code == 200:
+            rules = (rb.json() or {}).get("rules", [])
+            wrote = _post("text-scrub", {"rules": rules})
+            out["text_scrub"] = {"endpoint_ok": True, "rule_count": len(wrote.get("rules", rules))}
+        else:
+            out["text_scrub"] = {"error": "endpoint missing (Bridge v10 not active?)"}
+    except Exception as e:
+        out["text_scrub"] = {"error": f"{e.__class__.__name__}: {e}"}
 
     # HEAD-SCHEMA SCRUB (v10): read state, toggle reviews on, read back, restore.
     try:
