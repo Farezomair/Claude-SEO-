@@ -72,6 +72,7 @@ Your powers, all limited to this site:
 2. pattern — a conservative regex replacement/removal across pages (for things like "remove the posted date everywhere" where exact strings vary). Replacement may be empty to remove.
 3. approve / reject — decide a PENDING approval from the queue below, by its exact id.
 4. resolve_task — mark a "needs your attention" task from the list below as done, ONLY when the owner's message actually supplies/fixes what it asked for.
+5. scrub_schema — fix fabricated JSON-LD that lives in the page HEAD (injected by another plugin/theme, so text replace can't reach it): remove self-serving aggregateRating star ratings, and fix a fake streetAddress. Params: {{"strip_reviews": true/false, "bad_street": "the fake street value e.g. Meridian", "street_mode": "remove" (service-area, no street) or "replace", "street_value": "real street if replacing"}}. Use this for "remove the self-serving reviews" and for the fake-address options.
 
 HOW TO DECIDE — pick ONE of three responses:
 A) DO IT: the request is clear, safe, and you have every value needed -> return the operations. (Also fine for approve/reject/resolve_task using ids from the queue.)
@@ -84,7 +85,7 @@ WORKED EXAMPLE — fake street address ("streetAddress": "Meridian", a city not 
 - "Use my real street address" (detail: "Tell me the street and I'll put it everywhere, incl. your schema.")
 - "Switch to a service-area business" (detail: "Drop the street line and mark it as serving Meridian, ID & the Treasure Valley — truthful for a business without a public storefront, and Google-approved. No gap left.")
 - "Show just city & region" (detail: "Replace the fake street with 'Meridian, ID' so the block still reads cleanly.")
-When the owner picks one that needs a value, ASK for it; when they give it (or pick a self-contained option), DO IT.
+When the owner picks "service-area" or "show just city/region", DO IT via scrub_schema (bad_street=the fake value, street_mode=remove). When they give a real street, use scrub_schema street_mode=replace with their value. "Remove the self-serving reviews" -> scrub_schema strip_reviews=true.
 
 Strings currently on the live site (locate OLD values + their variants here):
 \"\"\"{facts}\"\"\"
@@ -105,7 +106,8 @@ Respond with ONLY a JSON object:
     {{"op": "pattern", "regex": "...", "replace": ""}},
     {{"op": "approve", "id": 12, "publish": true}},
     {{"op": "reject", "id": 13}},
-    {{"op": "resolve_task", "id": 44}}
+    {{"op": "resolve_task", "id": 44}},
+    {{"op": "scrub_schema", "strip_reviews": true, "bad_street": "Meridian", "street_mode": "remove", "street_value": ""}}
   ]}}
 Use EITHER options OR operations, not both (options wins if you're unsure). Both may be empty for a plain reply/question. Max {MAX_OPS} operations, 4 options."""
     response = _get_client().messages.create(
@@ -135,6 +137,12 @@ Use EITHER options OR operations, not both (options wins if you're unsure). Both
                             "publish": bool(r.get("publish", True))})
             except (TypeError, ValueError):
                 pass
+        elif op == "scrub_schema":
+            ops.append({"op": "scrub_schema",
+                        "strip_reviews": bool(r.get("strip_reviews", False)),
+                        "bad_street": str(r.get("bad_street", ""))[:120],
+                        "street_mode": "replace" if r.get("street_mode") == "replace" else "remove",
+                        "street_value": str(r.get("street_value", ""))[:200]})
     options = []
     for o in (data.get("options") or [])[:4]:
         lab = str(o.get("label", "")).strip()
@@ -216,6 +224,23 @@ def run_chat_fix(site_id: int, run_id: int, conn: dict, message: str, history: l
                 else:
                     reject_approval(db, appr)
                     results.append(f"“{appr.title[:60]}”: rejected")
+
+        # --- head-schema scrub ops (Bridge v10 output-buffer filter) ---
+        for o in [o for o in ops if o["op"] == "scrub_schema"]:
+            if not (o["strip_reviews"] or o["bad_street"]):
+                continue
+            _label("Scrubbing fabricated schema from the page head…")
+            hj = JobRun(site_id=site_id, kind="headscrub", status="running",
+                        summary="Scrubbing fabricated head schema…")
+            db.add(hj)
+            db.commit()
+            db.refresh(hj)
+            from .head_schema_agent import run_head_scrub
+            run_head_scrub(site_id, hj.id, conn, strip_reviews=o["strip_reviews"],
+                           bad_street=o["bad_street"], street_mode=o["street_mode"],
+                           street_value=o["street_value"])
+            db.refresh(hj)
+            results.append(hj.summary or "head schema scrubbed")
 
         # --- text/pattern ops across EVERY surface: pages AND posts, in both the
         # theme render source (_meridian_body via the Bridge) AND WordPress

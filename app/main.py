@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "reach-posts-74"
+BUILD = "head-scrub-75"
 
 
 @app.get("/version")
@@ -316,7 +316,7 @@ def _pipeline_state(run, report_id=None) -> dict:
 
 _DOER_JOB_KINDS = ["elementor", "image", "alttext", "schema", "schemaclean", "technical",
                    "headmeta", "robots", "perf", "webp", "linking", "ctxlinks", "redirects", "hrefs",
-                   "archives", "titlefix", "pagedraft"]
+                   "archives", "titlefix", "headscrub", "pagedraft"]
 _STATE_PRIORITY = {"active": 3, "failed": 2, "done": 1, "pending": 0}
 # Doer runs execute on in-process daemon threads, so any JobRun still 'running'
 # from BEFORE this process booted is a ghost (a redeploy killed its thread) — the
@@ -1085,6 +1085,22 @@ def bridge_selftest(site_id: int, request: Request, db: Session = Depends(get_db
     except Exception as e:
         out["robots"] = {"error": f"{e.__class__.__name__}: {e}"}
 
+    # HEAD-SCHEMA SCRUB (v10): read state, toggle reviews on, read back, restore.
+    try:
+        with httpx.Client(timeout=30.0, auth=auth, follow_redirects=True) as c:
+            rb = c.get(f"{base}/wp-json/seo-agent/v1/schema-scrub")
+            before = rb.json() if rb.status_code == 200 else None
+        if before is None:
+            out["schema_scrub"] = {"error": "endpoint missing (Bridge v10 not active?)"}
+        else:
+            wrote = _post("schema-scrub", {"strip_reviews": True})
+            out["schema_scrub"] = {"write_ok": bool(wrote.get("strip_reviews")),
+                                   "reverted": _post("schema-scrub",
+                                       {"strip_reviews": bool(before.get("strip_reviews"))})
+                                   .get("strip_reviews") == bool(before.get("strip_reviews"))}
+    except Exception as e:
+        out["schema_scrub"] = {"error": f"{e.__class__.__name__}: {e}"}
+
     # YOAST ARCHIVES (v9): read state, set tags=true, read back, restore.
     try:
         before = None
@@ -1431,6 +1447,31 @@ def run_archives_now(site_id: int, request: Request, db: Session = Depends(get_d
         db.refresh(run)
         from .archive_agent import start_archive_noindex_async
         start_archive_noindex_async(site_id, run.id, conn)
+    return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
+
+
+@app.post("/sites/{site_id}/run-head-scrub")
+def run_head_scrub_now(site_id: int, request: Request, strip_reviews: int = 1,
+                       bad_street: str = "", street_mode: str = "remove",
+                       street_value: str = "", db: Session = Depends(get_db)):
+    """Head-schema scrubber: strip self-serving reviews / fix fake street address
+    in the page-head JSON-LD via Bridge v10, verified live."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return RedirectResponse(f"/sites/{site_id}?tab=settings&notice=test_none", status_code=303)
+    run = JobRun(site_id=site_id, kind="headscrub", status="running",
+                 summary="Scrubbing fabricated head schema\u2026")
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    from .head_schema_agent import start_head_scrub_async
+    start_head_scrub_async(site_id, run.id, conn, strip_reviews=bool(strip_reviews),
+                           bad_street=bad_street, street_mode=street_mode, street_value=street_value)
     return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
 
 
