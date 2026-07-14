@@ -21,6 +21,7 @@ import httpx
 from .brain import ANTHROPIC_MODEL, _extract_json, _get_client
 from .database import SessionLocal
 from .elementor_agent import AbilitiesClient, list_elementor_pages, read_body, write_body
+from .wordpress import WordPressClient
 from .models import FixRecord, JobRun, RunLog, Site, SiteChange
 
 MAX_OPS = 12
@@ -216,53 +217,87 @@ def run_chat_fix(site_id: int, run_id: int, conn: dict, message: str, history: l
                     reject_approval(db, appr)
                     results.append(f"“{appr.title[:60]}”: rejected")
 
-        # --- text/pattern operations across page bodies ---
+        # --- text/pattern ops across EVERY surface: pages AND posts, in both the
+        # theme render source (_meridian_body via the Bridge) AND WordPress
+        # post_content. Fabricated data hides wherever it was authored, so a real
+        # fix has to reach all of them, not just page bodies. ---
         text_ops = [o for o in ops if o["op"] in ("replace", "pattern")]
         if text_ops:
             client = AbilitiesClient(conn["url"], conn["username"], conn["app_password"])
-            pages = list_elementor_pages(conn)[:MAX_PAGES]
-            pages_changed = total_hits = 0
-            for i, p in enumerate(pages, start=1):
-                pid = p.get("id")
-                if not pid:
-                    continue
-                _label(f"Applying across the site… page {i} of {len(pages)}")
-                body = read_body(client, pid)
-                if not body:
-                    continue
-                new_body, hits = body, 0
+            wp = WordPressClient(conn["url"], conn["username"], conn["app_password"])
+            try:
+                items = wp.list_content(kinds=("pages", "posts"), limit=MAX_PAGES)
+            except Exception:
+                items = [{"id": p["id"], "kind": "pages", "content_html": "",
+                          "title": p.get("title", "")} for p in list_elementor_pages(conn)]
+
+            def _apply(text):
+                out, hits = text, 0
                 for o in text_ops:
                     if o["op"] == "replace":
-                        n = new_body.count(o["find"])
+                        n = out.count(o["find"])
                         if n:
                             hits += n
-                            new_body = new_body.replace(o["find"], o["replace"])
+                            out = out.replace(o["find"], o["replace"])
                     else:
-                        new_body, n = re.subn(o["regex"], o["replace"], new_body)
+                        out, n = re.subn(o["regex"], o["replace"], out)
                         hits += n
-                if hits > 300:
-                    results.append(f"page {p.get('title', pid)}: {hits} matches looked unsafe — skipped")
+                return out, hits
+
+            locations_changed = total_hits = 0
+            for i, it in enumerate(items, start=1):
+                pid = it.get("id")
+                kind = it.get("kind") or "pages"
+                if not pid:
                     continue
-                if hits and new_body != body and write_body(client, pid, new_body):
-                    pages_changed += 1
-                    total_hits += hits
-                    db.add(SiteChange(
-                        site_id=site_id, kind="chat_fix",
-                        request=f"Fix Chat: {message[:120]}",
-                        css=new_body, old_css=body, status="applied",
-                        target_page_id=pid, target_widget_id=""))
-                    db.commit()
+                _label(f"Applying across the whole site… {i} of {len(items)}")
+                # Surface 1 — theme render source (_meridian_body); pages use this.
+                body = read_body(client, pid)
+                if body:
+                    nb, h = _apply(body)
+                    if 0 < h <= 300 and nb != body and write_body(client, pid, nb):
+                        locations_changed += 1
+                        total_hits += h
+                        db.add(SiteChange(
+                            site_id=site_id, kind="chat_fix",
+                            request=f"Fix Chat (body {pid}): {message[:90]}",
+                            css=nb, old_css=body, status="applied",
+                            target_page_id=pid, target_widget_id=""))
+                        db.commit()
+                # Surface 2 — WordPress post_content; blog POSTS live here.
+                content = it.get("content_html") or ""
+                if content:
+                    nc, h2 = _apply(content)
+                    if 0 < h2 <= 300 and nc != content:
+                        try:
+                            wp.update_content(kind, pid, nc)
+                            locations_changed += 1
+                            total_hits += h2
+                            db.add(SiteChange(
+                                site_id=site_id, kind="chat_fix",
+                                request=f"Fix Chat ({kind} {pid} content): {message[:80]}",
+                                css=nc, old_css=content, status="applied",
+                                target_page_id=pid, target_widget_id=""))
+                            db.commit()
+                        except Exception:
+                            results.append(f"{kind} #{pid}: content write failed")
+            # Best-effort cache purge so the live pages/posts update immediately.
+            try:
+                client.run("hostinger-ai-assistant/litespeed-cache-flush", {})
+            except Exception:
+                pass
             if total_hits:
-                results.append(f"{total_hits} text change(s) across {pages_changed} page(s)")
+                results.append(f"{total_hits} change(s) across {locations_changed} location(s) "
+                               "(pages, posts, and their render bodies)")
                 db.add(FixRecord(
                     site_id=site_id, doer="Fix Chat", field="chat_fix",
                     action_taken=f"Chat fix: {message[:160]}",
                     page_ref=site.url, before_value=f"{len(text_ops)} operation(s)",
-                    after_value=f"{total_hits} occurrence(s) across {pages_changed} page(s)",
+                    after_value=f"{total_hits} occurrence(s) across {locations_changed} location(s)",
                     method="chat", lane="gated", applied=True,
                     verification_verdict="applied", status="done"))
             else:
-                results.append("no matching text found on any page")
+                results.append("no matching text found on any page or post")
 
         run.status = "completed"
         run.summary = (plan["reply"] + " — " + "; ".join(results)
