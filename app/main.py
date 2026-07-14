@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "chat-approvals-72"
+BUILD = "chat-consult-73"
 
 
 @app.get("/version")
@@ -1385,8 +1385,10 @@ def site_chat_status(site_id: int, run_id: int, request: Request, db: Session = 
     run = db.get(JobRun, run_id)
     if not run or run.site_id != site_id or run.kind != "chatfix":
         return JSONResponse({"error": "unknown run"}, status_code=404)
+    from .chat_fixer import take_chat_options
+    opts = take_chat_options(run_id) if run.status != "running" else []
     return JSONResponse({"status": run.status, "reply": run.summary or "",
-                         "label": run.progress_label or ""})
+                         "label": run.progress_label or "", "options": opts})
 
 
 @app.post("/sites/{site_id}/track-ranks")

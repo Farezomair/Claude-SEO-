@@ -26,6 +26,14 @@ from .models import FixRecord, JobRun, RunLog, Site, SiteChange
 MAX_OPS = 12
 MAX_PAGES = 40
 
+# Per-run option chips awaiting the owner's pick (in-process, short-lived — the
+# chat polls once on completion and pops them). Consistent with main._doer_states.
+_CHAT_OPTS: dict = {}
+
+
+def take_chat_options(run_id: int) -> list:
+    return _CHAT_OPTS.pop(run_id, [])
+
 
 def _site_facts(site_url: str) -> str:
     """Context for the planner: contact-ish strings actually on the live site
@@ -52,35 +60,45 @@ def _site_facts(site_url: str) -> str:
 
 def plan_site_fixes(site_name: str, site_url: str, facts: str, queue: str,
                     message: str, history: list) -> dict:
-    """Ask Claude to turn the owner's message into operations — or refuse."""
+    """Turn the owner's message into operations, a set of options to choose from,
+    or a clarifying question. Consults before doing anything destructive."""
     convo = "\n".join(f"{m.get('role', 'user')}: {str(m.get('text', ''))[:300]}"
                       for m in (history or [])[-6:])
-    prompt = f"""You are the Fix Chat of Ascend, operating on EXACTLY ONE website: {site_name} ({site_url}).
+    prompt = f"""You are the Fix Chat of Ascend, a helpful assistant that fixes EXACTLY ONE website: {site_name} ({site_url}). You talk with the owner and, when it's clear and safe, make the change for them.
 
-Your ONLY powers, all limited to this site:
-1. replace — exact text replacement across the site's pages (contact details, license numbers, names, prices, wording; every format variant incl. tel:/mailto: links and JSON-LD values).
-2. pattern — a regular-expression replacement/removal across the site's pages, for things like "remove the posted date everywhere" where the exact strings vary. Write a precise, conservative Python regex (no catastrophic backtracking); replacement may be an empty string to remove. Prefer anchoring on surrounding markup when it makes the pattern safer.
-3. approve / reject — decide a PENDING approval from the queue below, by its exact id. approve may set publish true (live) or false (draft) when the owner says so; default publish true for fixes they explicitly asked to go live.
-4. resolve_task — mark a "needs your attention" task from the list below as done, ONLY when the owner's message actually supplies or fixes what it asked for.
+Your powers, all limited to this site:
+1. replace — exact text replacement across the site's pages (contact details, license numbers, names, prices, wording; every format variant incl. tel:/mailto: links and JSON-LD schema values).
+2. pattern — a conservative regex replacement/removal across pages (for things like "remove the posted date everywhere" where exact strings vary). Replacement may be empty to remove.
+3. approve / reject — decide a PENDING approval from the queue below, by its exact id.
+4. resolve_task — mark a "needs your attention" task from the list below as done, ONLY when the owner's message actually supplies/fixes what it asked for.
 
-STRICT SCOPE — refuse everything else with ONE friendly sentence and zero operations:
-- No research, no shopping/comparisons, no other websites, no code, no general questions.
-- Never invent facts; if a fix needs a value the owner didn't give, ask for it (zero operations).
-- approve/reject/resolve_task may ONLY use ids from the queue below.
+HOW TO DECIDE — pick ONE of three responses:
+A) DO IT: the request is clear, safe, and you have every value needed -> return the operations. (Also fine for approve/reject/resolve_task using ids from the queue.)
+B) OFFER OPTIONS: the request is DESTRUCTIVE or AMBIGUOUS, or blindly removing text would leave a visible GAP in the page (e.g. an empty contact block), or there's more than one reasonable way to do it -> return NO operations, a short reply naming the trade-off, and 2-4 concrete OPTIONS the owner can pick. Every option must be TRUTHFUL — never invent a fact (no made-up street, phone, license, price). Always include an option for the owner to supply the real value. When an option would just need their value, its detail should say so.
+C) ASK: you need a value the owner hasn't given and there's really only one path -> reply with the question, no operations, no options.
 
-Strings currently found on the live site (locate OLD values and their variants here):
+Refuse (one friendly sentence, nothing else) only truly out-of-scope asks: research, shopping, other websites, general questions, code.
+
+WORKED EXAMPLE — fake street address ("streetAddress": "Meridian", a city not a street). Don't just delete it (that leaves an empty address line and broken local schema). OFFER options like:
+- "Use my real street address" (detail: "Tell me the street and I'll put it everywhere, incl. your schema.")
+- "Switch to a service-area business" (detail: "Drop the street line and mark it as serving Meridian, ID & the Treasure Valley — truthful for a business without a public storefront, and Google-approved. No gap left.")
+- "Show just city & region" (detail: "Replace the fake street with 'Meridian, ID' so the block still reads cleanly.")
+When the owner picks one that needs a value, ASK for it; when they give it (or pick a self-contained option), DO IT.
+
+Strings currently on the live site (locate OLD values + their variants here):
 \"\"\"{facts}\"\"\"
 
-Pending approvals & owner tasks on this site:
+Pending approvals & owner tasks on this site (ids for approve/reject/resolve_task):
 \"\"\"{queue}\"\"\"
 
-{f'Recent conversation:{chr(10)}{convo}' if convo else ''}
+{f'Conversation so far:{chr(10)}{convo}' if convo else ''}
 
 The owner says:
 \"\"\"{message[:800]}\"\"\"
 
 Respond with ONLY a JSON object:
-{{"reply": "1-3 friendly sentences: what you're doing (or why not / what you still need)",
+{{"reply": "1-3 friendly sentences (what you did / the trade-off / your question)",
+  "options": [{{"label": "short choice", "detail": "one line on what it does"}}],
   "operations": [
     {{"op": "replace", "find": "...", "replace": "..."}},
     {{"op": "pattern", "regex": "...", "replace": ""}},
@@ -88,10 +106,10 @@ Respond with ONLY a JSON object:
     {{"op": "reject", "id": 13}},
     {{"op": "resolve_task", "id": 44}}
   ]}}
-(operations may be empty; max {MAX_OPS} total)"""
+Use EITHER options OR operations, not both (options wins if you're unsure). Both may be empty for a plain reply/question. Max {MAX_OPS} operations, 4 options."""
     response = _get_client().messages.create(
         model=ANTHROPIC_MODEL, max_tokens=1800,
-        system="You execute website fixes for one specific site and refuse everything else. You respond only with a single JSON object and nothing else.",
+        system="You are a careful website-fix assistant for one specific site. You consult before destructive changes, never invent facts, and respond only with a single JSON object and nothing else.",
         messages=[{"role": "user", "content": prompt}],
     )
     data = _extract_json(next((b.text for b in response.content if b.type == "text"), ""))
@@ -116,7 +134,16 @@ Respond with ONLY a JSON object:
                             "publish": bool(r.get("publish", True))})
             except (TypeError, ValueError):
                 pass
-    return {"reply": str(data.get("reply", "")).strip()[:600] or "Done.", "operations": ops}
+    options = []
+    for o in (data.get("options") or [])[:4]:
+        lab = str(o.get("label", "")).strip()
+        if lab:
+            options.append({"label": lab[:120], "detail": str(o.get("detail", "")).strip()[:220]})
+    # Options win if the model returned both (consult-first).
+    if options:
+        ops = []
+    return {"reply": str(data.get("reply", "")).strip()[:600] or "Done.",
+            "options": options, "operations": ops}
 
 
 def run_chat_fix(site_id: int, run_id: int, conn: dict, message: str, history: list) -> None:
@@ -155,6 +182,8 @@ def run_chat_fix(site_id: int, run_id: int, conn: dict, message: str, history: l
 
         ops = plan["operations"]
         if not ops:
+            if plan.get("options"):
+                _CHAT_OPTS[run_id] = plan["options"]
             run.status = "completed"
             run.summary = plan["reply"]
             db.commit()

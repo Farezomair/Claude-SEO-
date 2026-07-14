@@ -377,7 +377,7 @@
     </div>
   </div>
   <div class="fc-msgs" id="fc-msgs">
-    <div class="fc-msg bot">Tell me the fix and I will apply it across the site — exact swaps (“the real phone is 208 856 3233, update it everywhere”), pattern removals (“remove the posted date on every post”), and your queue (“approve the meta rewrites”, “mark the license task done”). Every change is snapshotted and re-checked by the next audit.</div>
+    <div class="fc-msg bot">Tell me the fix and I will apply it across the site — exact swaps (“the real phone is 208 856 3233, update it everywhere”), pattern removals (“remove the posted date on every post”), and your queue (“approve the meta rewrites”). For tricky ones — like removing the fake address without leaving a gap — I’ll lay out your options first and only act once you pick. Every change is snapshotted and re-checked by the next audit.</div>
   </div>
   <form class="fc-input" id="fc-form" onsubmit="return fcSend(event)">
     <textarea id="fc-text" rows="1" maxlength="800" placeholder="Describe the fix for this website… (Enter to send · Shift+Enter for a new line)" required></textarea>
@@ -409,6 +409,12 @@
   .fc-input { display:flex; gap:8px; padding:13px; border-top:1px solid var(--border); background:#fff; align-items:flex-end; }
   .fc-input textarea { flex:1; min-width:0; padding:11px 14px; font-size:14px; resize:none; line-height:1.5;
     max-height:170px; overflow-y:auto; }
+  .fc-opts { display:flex; flex-direction:column; gap:7px; align-self:flex-start; max-width:92%; margin-top:-2px; }
+  .fc-opt { text-align:left; background:#fff; border:1px solid var(--border); border-radius:11px;
+    padding:9px 13px; cursor:pointer; font:inherit; transition:border-color .12s, background .12s; }
+  .fc-opt:hover { border-color:var(--accent); background:var(--panel-2); }
+  .fc-opt b { display:block; font-size:13px; color:var(--text); }
+  .fc-opt span { display:block; font-size:11.5px; color:var(--muted); margin-top:2px; line-height:1.4; }
 </style>
 <script>
   // The conversation is remembered per site (localStorage): a refresh restores
@@ -474,6 +480,7 @@
           if (s.status === 'completed') {
             fcAdd('bot', s.reply || 'Done.');
             fcRemember('assistant', s.reply || 'Done.');
+            if (s.options && s.options.length) fcOptions(s.options);
           } else {
             fcAdd('bot err', s.reply || 'That failed — try again.');
             fcRemember('error', s.reply || 'That failed — try again.');
@@ -482,12 +489,30 @@
         .catch(function () {});
     }, 1500);
   }
-  function fcSend(ev) {
-    ev.preventDefault();
+  function fcOptions(opts) {
+    // Render the consult options as clickable chips; clicking picks that path.
+    var m = document.getElementById('fc-msgs');
+    var wrap = document.createElement('div');
+    wrap.className = 'fc-opts';
+    opts.forEach(function (o) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'fc-opt';
+      var strong = document.createElement('b');
+      strong.textContent = o.label;
+      b.appendChild(strong);
+      if (o.detail) { var s = document.createElement('span'); s.textContent = o.detail; b.appendChild(s); }
+      b.onclick = function () { wrap.remove(); fcSendText(o.label); };
+      wrap.appendChild(b);
+    });
+    m.appendChild(wrap);
+    m.scrollTop = m.scrollHeight;
+  }
+  function fcSendText(text) {
     var input = document.getElementById('fc-text');
     var btn = document.getElementById('fc-send');
-    var msg = input.value.trim();
-    if (!msg) return false;
+    var msg = (text || '').trim();
+    if (!msg) return;
     fcAdd('user', msg);
     fcRemember('user', msg);
     input.value = '';
@@ -508,6 +533,10 @@
       })
       .catch(function () { typing.remove(); btn.disabled = false;
         fcAdd('bot err', 'Network hiccup — try again.'); });
+  }
+  function fcSend(ev) {
+    ev.preventDefault();
+    fcSendText(document.getElementById('fc-text').value);
     return false;
   }
   // Restore the remembered conversation + resume an in-flight fix on load.
