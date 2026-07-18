@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "text-scrub-76"
+BUILD = "fact-guard-77"
 
 
 @app.get("/version")
@@ -316,7 +316,7 @@ def _pipeline_state(run, report_id=None) -> dict:
 
 _DOER_JOB_KINDS = ["elementor", "image", "alttext", "schema", "schemaclean", "technical",
                    "headmeta", "robots", "perf", "webp", "linking", "ctxlinks", "redirects", "hrefs",
-                   "archives", "titlefix", "headscrub", "textscrub", "pagedraft"]
+                   "archives", "titlefix", "headscrub", "textscrub", "imagerehost", "pagedraft"]
 _STATE_PRIORITY = {"active": 3, "failed": 2, "done": 1, "pending": 0}
 # Doer runs execute on in-process daemon threads, so any JobRun still 'running'
 # from BEFORE this process booted is a ghost (a redeploy killed its thread) — the
@@ -532,6 +532,14 @@ def site_detail(
         ctx["chart"] = _build_chart(pts)
         # Embedded Approvals + Settings panels.
         _collapse_dupe_approvals(db)
+        from .business_facts import get_facts, pricing_rows
+        _bf = get_facts(db, site_id)
+        if _bf:
+            _fd = {c.name: getattr(_bf, c.name) for c in _bf.__table__.columns}
+            _fd["pricing_text"] = "\n".join(f"{p['item']} | {p['price']}" for p in pricing_rows(_bf))
+            ctx["facts"] = _fd
+        else:
+            ctx["facts"] = {}
         from .rank_tracker import rank_rows
         ctx["rank_rows"] = rank_rows(db, site_id)
         from .models import KeywordTarget
@@ -1463,6 +1471,28 @@ def run_archives_now(site_id: int, request: Request, db: Session = Depends(get_d
     return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
 
 
+@app.post("/sites/{site_id}/run-image-rehost")
+def run_image_rehost_now(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """Image de-hotlink doer: download hotlinked stock images into the media
+    library and repoint the pages at the local copies."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+    conn = get_connection(site_id, site.url, site.name)
+    if not conn:
+        return RedirectResponse(f"/sites/{site_id}?tab=settings&notice=test_none", status_code=303)
+    run = JobRun(site_id=site_id, kind="imagerehost", status="running",
+                 summary="Re-hosting hotlinked stock images\u2026")
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    from .image_rehost_agent import start_image_rehost_async
+    start_image_rehost_async(site_id, run.id, conn)
+    return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
+
+
 @app.post("/sites/{site_id}/run-head-scrub")
 def run_head_scrub_now(site_id: int, request: Request, strip_reviews: int = 1,
                        bad_street: str = "", street_mode: str = "remove",
@@ -2176,6 +2206,38 @@ def amend(approval_id: int, request: Request, instructions: str = Form(""),
     db.commit()
     start_amend_async(approval_id, instructions)
     return RedirectResponse(_with_notice(ret, "amending"), status_code=303)
+
+
+@app.post("/sites/{site_id}/business-facts")
+def save_business_facts(site_id: int, request: Request,
+                        phone: str = Form(""), email: str = Form(""), license_no: str = Form(""),
+                        street: str = Form(""), city: str = Form(""), region: str = Form(""),
+                        postal: str = Form(""), service_area: str = Form(""),
+                        founded_year: str = Form(""), rating: str = Form(""),
+                        review_count: str = Form(""), pricing: str = Form(""),
+                        db: Session = Depends(get_db)):
+    """Save the site's VERIFIED business facts — the only real-world values the
+    content generator is allowed to state (defects #2/#3/#5/#9)."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    from .models import BusinessFacts
+    bf = db.query(BusinessFacts).filter(BusinessFacts.site_id == site_id).first()
+    if not bf:
+        bf = BusinessFacts(site_id=site_id)
+        db.add(bf)
+    rows = []
+    for line in (pricing or "").splitlines():
+        if "|" in line:
+            item, price = line.split("|", 1)
+            if item.strip():
+                rows.append({"item": item.strip()[:120], "price": price.strip()[:60]})
+    bf.phone, bf.email, bf.license_no = phone.strip(), email.strip(), license_no.strip()
+    bf.street, bf.city, bf.region, bf.postal = street.strip(), city.strip(), region.strip(), postal.strip()
+    bf.service_area, bf.founded_year = service_area.strip(), founded_year.strip()
+    bf.rating, bf.review_count = rating.strip(), review_count.strip()
+    bf.pricing_json = json.dumps(rows[:60])
+    db.commit()
+    return RedirectResponse(f"/sites/{site_id}?tab=settings&notice=facts_saved", status_code=303)
 
 
 @app.post("/sites/{site_id}/connection")

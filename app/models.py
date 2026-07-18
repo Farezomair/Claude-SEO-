@@ -370,3 +370,28 @@ class RankSnapshot(Base):
     clicks = Column(Integer, default=0)
     impressions = Column(Integer, default=0)
     created_at = Column(DateTime, default=utcnow)
+
+
+class BusinessFacts(Base):
+    """The single source of truth for a site's VERIFIED real-world facts —
+    the values the content generator is allowed to state. Anything not here is
+    omitted, never invented. NAP, credentials, and a structured pricing table
+    (JSON list of {item, price}) so every page quotes one consistent figure."""
+
+    __tablename__ = "business_facts"
+
+    id = Column(Integer, primary_key=True)
+    site_id = Column(Integer, ForeignKey("sites.id", ondelete="CASCADE"), nullable=False, unique=True)
+    phone = Column(String(60), default="")
+    email = Column(String(160), default="")
+    license_no = Column(String(80), default="")
+    street = Column(String(200), default="")       # blank = service-area business (no storefront)
+    city = Column(String(120), default="")
+    region = Column(String(80), default="")         # state/province
+    postal = Column(String(30), default="")
+    service_area = Column(String(300), default="")  # e.g. "Meridian, ID & the Treasure Valley"
+    founded_year = Column(String(12), default="")
+    rating = Column(String(12), default="")         # only if verifiable (real GBP), else blank
+    review_count = Column(String(12), default="")
+    pricing_json = Column(Text, default="")         # JSON: [{"item": "...", "price": "..."}]
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)

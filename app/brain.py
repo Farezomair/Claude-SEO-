@@ -25,6 +25,25 @@ WRITING_STANDARD = (
     "- Vary sentence length. Be definitive and plain. Every sentence carries information."
 )
 
+# The fact-accuracy standard, injected into every content-GENERATION prompt.
+# A hard constraint (not a style preference): the model must never invent
+# quantitative trust claims or placeholder real-world facts. Pairs with the
+# verified-facts block, which lists what the site is actually allowed to state.
+FACT_STANDARD = (
+    "\n\nFact-accuracy standard (MANDATORY — a hard rule, not a style choice):\n"
+    "- NEVER invent quantitative trust claims: star ratings, review counts, aggregate "
+    "ratings, project/job/client counts, years in business, 'since <year>', award or "
+    "accreditation claims (e.g. 'A+ BBB', 'award-winning'), or named testimonials. State "
+    "these ONLY if the exact value appears in the verified facts provided; otherwise omit them.\n"
+    "- NEVER invent real-world identifiers: phone numbers, license/registration numbers, street "
+    "addresses, emails, founding dates. If one isn't in the verified facts, OMIT it — never use "
+    "a plausible placeholder (no '555' phone, no '#12345' license, no city-as-street).\n"
+    "- NEVER invent specific prices. Use only prices from the verified pricing table; if a price "
+    "isn't there, speak qualitatively ('cost varies with size and materials') or omit it.\n"
+    "- Prefer saying less. A page with fewer, true statements beats one padded with invented "
+    "credibility. This applies to the title, meta description, body, and schema alike."
+)
+
 TITLE_MAX = 60
 DESC_MAX = 160
 
@@ -75,12 +94,15 @@ def _amend_block(instructions: str) -> str:
 
 def generate_meta(page_title: str, page_url: str, content_excerpt: str,
                   site_name: str = "", rules: str = "", instructions: str = "",
-                  target_keyword: str = "") -> dict:
+                  target_keyword: str = "", facts: str = "", allowed: set | None = None) -> dict:
     """Return {"title": str, "description": str} for a page. When the Keyword
-    Brain has mapped a target query for this page, the copy is written to win it."""
+    Brain has mapped a target query for this page, the copy is written to win it.
+    Any field that comes back with a fabricated trust claim (a rating/review count
+    not in the verified facts) is dropped, so no invented credibility reaches a
+    meta description or search snippet."""
     prompt = f"""You are an expert SEO copywriter. Write an SEO meta title and meta description for this web page.{_rules_block(rules)}{_amend_block(instructions)}
 
-{META_GUIDE}
+{META_GUIDE}{FACT_STANDARD}{facts}
 
 Site name: {site_name or "(unknown)"}
 Page URL: {page_url}
@@ -111,6 +133,13 @@ Respond with ONLY a JSON object, no preamble and no markdown, in exactly this sh
     data = _extract_json(text)
     title = str(data.get("title", "")).strip().strip('"')[:TITLE_MAX]
     description = str(data.get("description", "")).strip().strip('"')[:DESC_MAX]
+    # Hard gate: never let an invented rating/review-count/etc. into a title or
+    # meta description (defect #9 — fabricated claims were reaching search snippets).
+    from .content_standard import scan_trust
+    if title and scan_trust(title, allowed):
+        title = ""
+    if description and scan_trust(description, allowed):
+        description = ""
     return {"title": title, "description": description}
 
 
@@ -301,7 +330,7 @@ PAGE_BRIEFS = {
 
 
 def generate_page(site_name: str, site_url: str, page_type: str, rules: str = "",
-                  instructions: str = "") -> dict:
+                  instructions: str = "", facts: str = "") -> dict:
     """Draft a missing required page. Returns {"title", "body_html", "legal"}."""
     brief = PAGE_BRIEFS.get(page_type, f"a {page_type} page")
     legal = page_type in LEGAL_PAGES
@@ -321,7 +350,7 @@ def generate_page(site_name: str, site_url: str, page_type: str, rules: str = ""
 
 Format the body as simple HTML using only <h2>, <h3>, <p>, <ul>, <li>, <strong>. Do NOT
 include an <h1> (the title is separate) and do NOT wrap it in <html> or <body>.
-{WRITING_STANDARD}
+{WRITING_STANDARD}{FACT_STANDARD}{facts}
 
 Respond with ONLY a JSON object, no preamble, in exactly this shape:
 {{"title": "...", "body_html": "..."}}"""
@@ -342,7 +371,8 @@ Respond with ONLY a JSON object, no preamble, in exactly this shape:
 
 def improve_meta(page_title: str, page_url: str, content_excerpt: str,
                  current_title: str, current_desc: str, target_query: str = "",
-                 site_name: str = "", rules: str = "", instructions: str = "") -> dict:
+                 site_name: str = "", rules: str = "", instructions: str = "",
+                 facts: str = "", allowed: set | None = None) -> dict:
     """Rewrite an existing page's meta title + description to earn more clicks
     from Google. Returns {"title", "description"}."""
     if target_query:
@@ -372,6 +402,8 @@ Page content excerpt:
 {content_excerpt}
 \"\"\"
 
+{FACT_STANDARD}{facts}
+
 Respond with ONLY a JSON object, no preamble:
 {{"title": "...", "description": "..."}}"""
 
@@ -382,10 +414,14 @@ Respond with ONLY a JSON object, no preamble:
     )
     text = next((b.text for b in response.content if b.type == "text"), "")
     data = _extract_json(text)
-    return {
-        "title": str(data.get("title", "")).strip().strip('"')[:TITLE_MAX],
-        "description": str(data.get("description", "")).strip().strip('"')[:DESC_MAX],
-    }
+    from .content_standard import scan_trust
+    title = str(data.get("title", "")).strip().strip('"')[:TITLE_MAX]
+    description = str(data.get("description", "")).strip().strip('"')[:DESC_MAX]
+    if title and scan_trust(title, allowed):
+        title = ""
+    if description and scan_trust(description, allowed):
+        description = ""
+    return {"title": title, "description": description}
 
 
 def correct_content(title: str, body_html: str, rules: str = "", instructions: str = "") -> dict:

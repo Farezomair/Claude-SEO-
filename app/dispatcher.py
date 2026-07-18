@@ -80,6 +80,17 @@ NO_CAP = {
 }
 
 
+def _facts_for(db, site_id: int):
+    """(facts_block, allowed_values) for the generator — the verified facts the
+    site may state, and the literal values the trust gate treats as legitimate."""
+    try:
+        from .business_facts import get_facts, facts_block, allowed_values
+        bf = get_facts(db, site_id)
+        return facts_block(bf), allowed_values(bf)
+    except Exception:
+        return "", set()
+
+
 def _norm(url: str) -> str:
     p = urlparse(url or "")
     return (p.netloc.lower().removeprefix("www.") + (p.path or "/").rstrip("/")).lower()
@@ -110,8 +121,9 @@ def _fix_meta(db, ctx, f):
     from .keyword_brain import keyword_for
     target_kw = keyword_for(db, ctx["site"].id, item["link"])
     try:
+        _fb, _allow = _facts_for(db, ctx["site"].id)
         sugg = generate_meta(item["title"], item["link"], item["content_text"], ctx["site"].name,
-                             target_keyword=target_kw)
+                             target_keyword=target_kw, facts=_fb, allowed=_allow)
     except Exception as exc:
         return ("escalated", f"Meta generation failed ({exc.__class__.__name__}).", False)
 
@@ -195,7 +207,8 @@ def _propose_required_page(db, ctx, f):
     created_note = ""
     if page_type not in published and page_type not in ctx["existing_slugs"]:
         try:
-            page = generate_page(ctx["site"].name, ctx["site"].url, page_type, instructions=_PUBLISH_INSTR)
+            page = generate_page(ctx["site"].name, ctx["site"].url, page_type,
+                                 instructions=_PUBLISH_INSTR, facts=_facts_for(db, ctx["site"].id)[0])
         except Exception as exc:
             return ("escalated", f"Page generation failed ({exc.__class__.__name__}).", False)
         if not page.get("title") or not page.get("body_html"):
@@ -235,7 +248,9 @@ def _propose_dedupe(db, ctx, f):
     if _pending_payload_match(db, ctx["site"].id, "meta_rewrite", "page_id", item["id"]):
         return ("in-progress", "A unique-title rewrite is already waiting in Approvals.", False)
     try:
-        sugg = generate_meta(item["title"], item["link"], item["content_text"], ctx["site"].name)
+        _fb, _allow = _facts_for(db, ctx["site"].id)
+        sugg = generate_meta(item["title"], item["link"], item["content_text"], ctx["site"].name,
+                             facts=_fb, allowed=_allow)
     except Exception as exc:
         return ("escalated", f"Title generation failed ({exc.__class__.__name__}).", False)
     new_title = sugg.get("title", "")
@@ -261,7 +276,9 @@ def _propose_ranking(db, ctx, f):
     cur_desc = (item["meta"].get(YOAST_DESC_KEY) or "").strip()
     from .keyword_brain import keyword_for
     try:
+        _fb, _allow = _facts_for(db, ctx["site"].id)
         sugg = improve_meta(item["title"], item["link"], item["content_text"], cur_title, cur_desc,
+                            facts=_fb, allowed=_allow,
                             target_query=keyword_for(db, ctx["site"].id, item["link"]),
                             site_name=ctx["site"].name)
     except Exception as exc:
@@ -473,6 +490,23 @@ def _propose_schema_cleanup(db, ctx, f):
             "Removing broken/placeholder/deprecated structured data from the live page (verified).", False)
 
 
+def _propose_image_rehost(db, ctx, f):
+    """De-hotlink stock images into the media library (once per run)."""
+    if ctx.get("rehost_done"):
+        return ("in-progress", "Covered by the image re-host running this run.", False)
+    from .image_rehost_agent import start_image_rehost_async
+    ij = JobRun(site_id=ctx["site"].id, kind="imagerehost", status="running",
+                summary="Re-hosting hotlinked stock images\u2026")
+    db.add(ij)
+    db.commit()
+    db.refresh(ij)
+    start_image_rehost_async(ctx["site"].id, ij.id, ctx["conn"])
+    ctx["rehost_done"] = True
+    return ("in-progress",
+            "Downloading hotlinked stock images into your media library (de-hotlinking); "
+            "whether any are shown as your projects stays your call.", False)
+
+
 def _propose_archives(db, ctx, f):
     """Noindex thin tag/category/author archives via Yoast (Bridge v9; once per run)."""
     if ctx.get("archives_done"):
@@ -604,6 +638,7 @@ HANDLERS = {
     "title_conflict": _propose_title_fix,
     "internal_redirect_links": _propose_href_rewrite,
     "junk_archives": _propose_archives,
+    "stock_images_hotlinked": _propose_image_rehost,
     "low_internal_links": _propose_context_links,
     "schema_selfserving_reviews": _propose_schema_cleanup,
     "schema_duplicate_entity": _propose_schema_cleanup,

@@ -313,6 +313,15 @@ def validate_rewrite(old_html: str, new_html: str) -> list[str]:
         flags.append("Contained em dashes (auto-stripped).")
     if sc.get("banned"):
         flags.append("Contains banned words: " + ", ".join(sc["banned"][:5]))
+    # Hard fact-accuracy gate: a rewrite must not INTRODUCE quantitative trust
+    # claims (ratings, review/project counts, years) or placeholder facts that
+    # weren't already in the original. New fabricated credibility routes to human
+    # review instead of auto-applying.
+    from .content_standard import scan_trust
+    old_claims = {c.lower() for c in scan_trust(old_html)}
+    new_claims = [c for c in scan_trust(new_html) if c.lower() not in old_claims]
+    if new_claims:
+        flags.append("Introduces unverified trust claim(s): " + ", ".join(new_claims[:4]))
     return flags
 
 

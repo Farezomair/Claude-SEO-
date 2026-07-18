@@ -346,6 +346,30 @@
         <div class="notice notice-muted">Google isn't set up yet (one-time OAuth client needed in Railway).</div>
       {% endif %}
 
+      <h3 style="margin-top:24px;">Verified business facts</h3>
+      <p class="muted" style="margin-top:-2px; font-size:13px;">The single source of truth for real-world facts. The content agent may state <strong>only</strong> what you enter here — anything left blank is omitted, never invented. Leave the street blank if you're a service-area business.</p>
+      {% if notice == 'facts_saved' %}<div class="notice notice-success">✓ Business facts saved.</div>{% endif %}
+      <form method="post" action="/sites/{{ site.id }}/business-facts" style="margin-top:12px;">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px;">
+          <div class="field"><label>Phone</label><input type="text" name="phone" value="{{ facts.phone or '' }}" placeholder="(208) 856-3233"></div>
+          <div class="field"><label>Email</label><input type="text" name="email" value="{{ facts.email or '' }}"></div>
+          <div class="field"><label>License / registration #</label><input type="text" name="license_no" value="{{ facts.license_no or '' }}" placeholder="RCE-69511"></div>
+          <div class="field"><label>Founded / since (year)</label><input type="text" name="founded_year" value="{{ facts.founded_year or '' }}"></div>
+          <div class="field"><label>Street address <span class="muted">(blank = service-area)</span></label><input type="text" name="street" value="{{ facts.street or '' }}"></div>
+          <div class="field"><label>City</label><input type="text" name="city" value="{{ facts.city or '' }}" placeholder="Meridian"></div>
+          <div class="field"><label>State / region</label><input type="text" name="region" value="{{ facts.region or '' }}" placeholder="ID"></div>
+          <div class="field"><label>Postal code</label><input type="text" name="postal" value="{{ facts.postal or '' }}"></div>
+          <div class="field" style="grid-column:1/-1;"><label>Service area <span class="muted">(if no storefront)</span></label><input type="text" name="service_area" value="{{ facts.service_area or '' }}" placeholder="Meridian, ID & the Treasure Valley"></div>
+          <div class="field"><label>Verified rating <span class="muted">(only if real)</span></label><input type="text" name="rating" value="{{ facts.rating or '' }}" placeholder="leave blank if unverified"></div>
+          <div class="field"><label>Verified review count</label><input type="text" name="review_count" value="{{ facts.review_count or '' }}" placeholder="leave blank if unverified"></div>
+        </div>
+        <div class="field" style="margin-top:6px;">
+          <label>Pricing table <span class="muted">— one per line, "item | price". Every page quotes THESE exact figures.</span></label>
+          <textarea name="pricing" rows="5" placeholder="Outdoor kitchen (average) | $16,000&#10;Stamped concrete patio | $8–$18 / sq ft&#10;Fire pit | starting at $8,000">{{ facts.pricing_text or '' }}</textarea>
+        </div>
+        <button class="btn" type="submit">Save business facts</button>
+      </form>
+
       <h3 style="margin-top:24px;">Automatic schedule</h3>
       <p class="muted">{% if scheduler_enabled %}On — runs itself every {{ interval_days }} days.{% else %}Off.{% endif %}</p>
     </div>
