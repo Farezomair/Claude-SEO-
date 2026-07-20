@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "approvals-lanes-82"
+BUILD = "brain-generic-83"
 
 
 @app.get("/version")
@@ -228,8 +228,19 @@ def grow(request: Request, site_id: int = 0, db: Session = Depends(get_db)):
                    .order_by(KeywordTarget.page_path).all())
         ctx["rank_rows"] = rows
         ctx["keyword_targets"] = targets
-        # Derive the next-moves playbook from real data (no AI call needed).
+        # Next-moves playbook: brain-aware growth moves from the latest business
+        # audit first (they know the business model + strategy), then concrete
+        # ranking-based moves derived from live data.
         play = []
+        try:
+            from .business_brain import latest_audit as _bl
+            ba = _bl(db, site.id)
+            if ba and getattr(ba, "growth_json", ""):
+                for m in (json.loads(ba.growth_json) or [])[:6]:
+                    play.append({"kind": m.get("kind", "build"), "tag": m.get("tag", "Grow"),
+                                 "title": m.get("title", ""), "detail": m.get("detail", "")})
+        except Exception:
+            pass
         for r in rows:
             if 10 < r["latest"] <= 20:
                 play.append({"kind": "push", "tag": "Push", "title": f"Get “{r['keyword']}” onto page 1",
@@ -245,15 +256,17 @@ def grow(request: Request, site_id: int = 0, db: Session = Depends(get_db)):
         if unranked:
             play.append({"kind": "build", "tag": "Build", "title": f"Get your other {len(unranked)} target keyword(s) ranking",
                          "detail": "These pages aren't showing in Google yet — Ascend's weekly run keeps optimizing them; give newer pages a few weeks."})
-        try:
-            from .business_brain import latest_audit as _bl
-            ba = _bl(db, site.id)
-            if ba and ba.findings_json:
-                for f in (json.loads(ba.findings_json) or [])[:2]:
-                    play.append({"kind": "build", "tag": "Business", "title": f.get("title", ""),
-                                 "detail": f.get("detail", "")[:160]})
-        except Exception:
-            pass
+        if not any(p.get("tag") not in ("Push", "Climb", "Win", "Build", "Setup") for p in play):
+            # No brain-aware growth moves yet — fall back to top business findings.
+            try:
+                from .business_brain import latest_audit as _bl2
+                ba2 = _bl2(db, site.id)
+                if ba2 and ba2.findings_json:
+                    for f in (json.loads(ba2.findings_json) or [])[:2]:
+                        play.append({"kind": "build", "tag": "Business", "title": f.get("title", ""),
+                                     "detail": f.get("detail", "")[:160]})
+            except Exception:
+                pass
         from .strategy_brain import is_configured, get_brain
         if not is_configured(get_brain(db, site.id)):
             play.insert(0, {"kind": "strategy", "tag": "Setup", "title": "Set up your Business Brain",

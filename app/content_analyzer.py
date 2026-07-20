@@ -68,7 +68,7 @@ def _pick_pages(client, start_url):
     return pages
 
 
-def analyze_site_content(start_url: str, site_name: str, progress_cb=None) -> tuple[list[dict], int]:
+def analyze_site_content(start_url: str, site_name: str, progress_cb=None, brain: str = "") -> tuple[list[dict], int]:
     """Return (issues, pages_examined). pages_examined is the count of real content
     pages actually judged — the scorer divides content/GEO penalty by it so the
     score reflects average per-page quality, not how many pages we happened to read."""
@@ -91,7 +91,7 @@ def analyze_site_content(start_url: str, site_name: str, progress_cb=None) -> tu
                 continue
             examined += 1
             try:
-                analysis = analyze_page_content(site_name, url, title, text)
+                analysis = analyze_page_content(site_name, url, title, text, brain=brain)
             except Exception:
                 continue
             for f in analysis.get("findings", []):

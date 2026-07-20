@@ -527,18 +527,21 @@ CONTENT_CATS = {"eeat_weak", "content_shallow", "content_stale", "geo_unstructur
 CONTENT_SEV = {"low", "medium", "high"}
 
 
-def analyze_page_content(site_name: str, url: str, title: str, text: str) -> dict:
+def analyze_page_content(site_name: str, url: str, title: str, text: str, brain: str = "") -> dict:
     """Claude judges ONE page for content quality, E-E-A-T, and AI citability.
 
     Returns {"content_score": int, "geo_score": int, "findings": [issue dicts]}
     where each finding is {category, severity, detail} using the CONTENT_CATS.
+    The strategy brain (when set) makes the judgement business-model-aware — an
+    e-commerce store, a SaaS, and a local service are held to different standards,
+    and anything the owner has declared intentional is not flagged.
     """
     prompt = f"""You are a strict senior SEO content auditor. Assess ONE page for content quality, E-E-A-T, and AI-search (GEO) citability. Be specific to THIS page — never generic.
 
 Site: {site_name}
 URL: {url}
 Title: {title}
-
+{brain}
 Visible page text (may be truncated):
 \"\"\"
 {text[:6000]}
@@ -548,6 +551,8 @@ Judge against this expert standard:
 {EEAT_GUIDE}
 
 {GEO_GUIDE}
+
+Judge by the RIGHT yardstick for THIS business model (from the strategy above if given): a product page needs specs/price/shipping/reviews; a SaaS page needs value prop/pricing/social proof; a local service needs service area/credentials/contact; a content/affiliate page needs depth/first-hand insight/disclosure. Do NOT flag as problems the things the owner declared intentional, and follow their stated stance on unverifiable claims.
 
 Use category "needs_real_data" when the fix requires a real-world fact only the business owner can supply and that you must NOT invent — e.g. a real phone number, license/registration number, physical address, actual prices, certifications, or real dates/years. Describe exactly what the owner should add.
 

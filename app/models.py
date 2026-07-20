@@ -431,6 +431,7 @@ class BusinessAudit(Base):
     categories_json = Column(Text, default="")           # [{label, score, note}]
     findings_json = Column(Text, default="")             # [{severity, title, detail}]
     competitors_json = Column(Text, default="")          # [{name, url, strengths, gaps_vs_you}]
+    growth_json = Column(Text, default="")             # brain-aware growth moves
     summary = Column(Text, default="")
     created_at = Column(DateTime, default=utcnow)
 

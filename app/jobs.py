@@ -62,8 +62,9 @@ def _run_audit(site_id: int, audit_id: int, start_url: str, progress_run_id: int
         content_pages = 1
         _prog(60, "deep-reading content (E-E-A-T & AI citability)")
         try:
+            from .strategy_brain import brain_context_str as _bcs
             _c_issues, content_pages = analyze_site_content(
-                start_url, site.name if site else "",
+                start_url, site.name if site else "", brain=_bcs(site_id),
                 progress_cb=lambda d, t: _prog(60 + int(30 * d / max(1, t)),
                                                f"deep-reading content \u2014 page {d} of {t}"))
             all_issues += _c_issues

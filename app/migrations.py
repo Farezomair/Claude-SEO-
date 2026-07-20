@@ -38,6 +38,9 @@ WANTED_COLUMNS = {
         "amend_note": "TEXT",
     },
     # Scored audit (rebuilt auditor).
+    "business_audits": {
+        "growth_json": "TEXT",
+    },
     "audits": {
         "health_score": "INTEGER",
         "grade": "VARCHAR(2)",

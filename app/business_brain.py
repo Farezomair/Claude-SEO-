@@ -198,7 +198,9 @@ Respond with ONLY a JSON object:
   "summary": "3-5 sentence plain-English read of how the site performs AS A BUSINESS and the #1 thing to fix",
   "categories": [{{"key": "model_fit|offer_clarity|conversion_path|trust_proof|differentiation", "label": "Model fit", "score": 0-100, "note": "one line"}}],
   "findings": [{{"severity": "high|medium|low", "title": "short", "detail": "specific, actionable"}}],
-  "competitors": [{{"name": "...", "url": "...", "strengths": "what they do well", "gaps_vs_you": "what they have that this site lacks"}}]}}"""
+  "competitors": [{{"name": "...", "url": "...", "strengths": "what they do well", "gaps_vs_you": "what they have that this site lacks"}}],
+  "growth_moves": [{{"tag": "one word e.g. Convert/Trust/Offer/Traffic/Product", "kind": "push|build|win", "title": "a concrete next move to grow THIS business", "detail": "why it matters and roughly how"}}]}}
+For growth_moves: 3-6 prioritized, business-model-appropriate actions to grow revenue/goal completion (aligned to the owner's strategy above — do not suggest things they've ruled out). A store gets product/merchandising/review moves; a SaaS gets pricing/trial/onboarding moves; a lead-gen gets more-locations/faster-response moves; a content site gets topic-cluster/monetization moves."""
         _label("Scoring business fitness…")
         response = _get_client().messages.create(
             model=ANTHROPIC_MODEL, max_tokens=2600,
@@ -218,11 +220,15 @@ Respond with ONLY a JSON object:
         comps = [{"name": str(c.get("name", ""))[:120], "url": str(c.get("url", ""))[:300],
                   "strengths": str(c.get("strengths", ""))[:300], "gaps_vs_you": str(c.get("gaps_vs_you", ""))[:300]}
                  for c in (data.get("competitors") or [])[:6]]
+        moves = [{"tag": str(m.get("tag", "Grow"))[:16], "kind": (m.get("kind") if m.get("kind") in ("push", "build", "win") else "build"),
+                  "title": str(m.get("title", ""))[:160], "detail": str(m.get("detail", ""))[:300]}
+                 for m in (data.get("growth_moves") or [])[:6] if str(m.get("title", "")).strip()]
 
         db.add(BusinessAudit(
             site_id=site_id, score=overall, grade=_grade(overall),
             categories_json=json.dumps(cats), findings_json=json.dumps(findings),
-            competitors_json=json.dumps(comps), summary=str(data.get("summary", ""))[:1200]))
+            competitors_json=json.dumps(comps), growth_json=json.dumps(moves),
+            summary=str(data.get("summary", ""))[:1200]))
         run.status = "completed"
         run.summary = f"Business Fitness: {overall}/100 ({_grade(overall)}). " + str(data.get("summary", ""))[:180]
         db.add(RunLog(site_id=site_id, message=f"Business audit: {overall}/100 ({_grade(overall)})"))
