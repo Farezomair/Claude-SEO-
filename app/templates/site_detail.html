@@ -105,13 +105,19 @@
       </div>
     </div>
 
+    {% if business_run_id %}
+    <div class="biz-run" id="biz-run" data-run="{{ business_run_id }}">
+      <div class="biz-run-label" id="biz-run-label">🔎 Starting the business audit… reading your site and competitors.</div>
+      <div class="biz-bar"><i></i></div>
+      <p class="muted" style="font-size:12px; margin:8px 0 0;">This updates on its own — no need to refresh.</p>
+    </div>
+    {% endif %}
+
     {% if not business_profile %}
     <div class="empty" style="margin-top:16px;">
       <p style="margin:0 0 12px;">Set up the Business Auditor so it understands your business, then it scores how well the site serves it and how you compare to competitors.</p>
       <button class="btn" type="button" id="biz-setup-btn" onclick="bizSetup()">Set up the Business Auditor</button>
     </div>
-    {% elif business_running and not business_audit %}
-    <div class="empty" style="margin-top:16px;">Running the first business audit… <span class="muted">this reads your site and competitors — give it a moment, then refresh.</span></div>
     {% elif business_audit %}
     <div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap; margin-top:8px;">
       <div class="score-ring grade-{{ business_audit.grade }}" style="--p:{{ business_audit.score }};">
@@ -236,42 +242,54 @@
   </details>
   {% endif %}
 
-  <!-- Rankings — the outcome loop (expandable) -->
+  <!-- Where you rank on Google (plain-language) -->
   <details class="cc-panel" {{ 'open' if rank_rows else '' }}>
-    <summary><h2>Rankings — are the fixes moving Google?</h2>{% if rank_rows %}<span class="pill-count" style="margin-left:6px;">{{ rank_rows|length }}</span>{% endif %}</summary>
+    <summary><h2>Where you show up on Google</h2>{% if rank_rows %}<span class="pill-count" style="margin-left:6px;">{{ rank_rows|length }}</span>{% endif %}</summary>
     <div class="panel-body">
-      <p class="muted" style="margin-top:0; font-size:13px;">
-        Each target keyword's real Google position (Search Console, 7-day window), tracked on every weekly run.
-        Lower is better — the trend shows whether the crew's fixes are moving rankings, not just the health score.
+      <p style="margin-top:0; font-size:13.5px; line-height:1.6;">
+        These are the Google searches you're trying to win. <strong>“Position”</strong> is your spot in Google's results —
+        <strong>1–10 is the first page</strong> (where almost all clicks go), 11–20 is page&nbsp;2, and so on. Lower is better.
+        We check your real position from Google every week, so you can see if your rankings are actually climbing.
       </p>
-      <form method="post" action="/sites/{{ site.id }}/track-ranks" style="margin-bottom:14px;">
-        <button class="btn secondary small" type="submit">Track positions now</button>
+      <form method="post" action="/sites/{{ site.id }}/track-ranks" style="margin:0 0 16px;">
+        <button class="btn secondary small" type="submit">↻ Check my Google positions now</button>
       </form>
       {% if rank_rows %}
-      <div class="card" style="padding:0; margin:0;">
-        <table>
-          <thead><tr><th>Target keyword</th><th>Page</th><th>Position</th><th>Trend</th><th>Change</th><th>Fixes on page</th></tr></thead>
-          <tbody>
-            {% for r in rank_rows %}
-            <tr>
-              <td style="font-weight:600;">{{ r.keyword }}<div class="muted" style="font-size:11.5px; font-weight:400;">{{ r.impressions }} impressions / 7d</div></td>
-              <td class="muted" style="font-size:12.5px; white-space:nowrap;">{{ r.path }}</td>
-              <td style="font-weight:700; font-variant-numeric:tabular-nums;">{{ r.latest }}</td>
-              <td>{% if r.spark %}<svg viewBox="0 0 120 26" style="width:120px; height:26px;"><polyline points="{{ r.spark }}" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linejoin="round"/></svg>{% else %}<span class="muted" style="font-size:12px;">{{ r.snaps }} snapshot{{ '' if r.snaps == 1 else 's' }}</span>{% endif %}</td>
-              <td>
-                {% if r.snaps < 2 %}<span class="muted" style="font-size:12px;">baseline</span>
-                {% elif r.delta > 0 %}<span style="color:#0a9b6d; font-weight:700;">▲ {{ r.delta }}</span>
-                {% elif r.delta < 0 %}<span style="color:#dc4664; font-weight:700;">▼ {{ -r.delta }}</span>
-                {% else %}<span class="muted">—</span>{% endif %}
-              </td>
-              <td class="muted" style="font-size:12.5px;">{{ r.page_fixes or '—' }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        {% for r in rank_rows %}
+        {% set page = 1 if r.latest <= 10 else (2 if r.latest <= 20 else ((r.latest / 10) | round(0, 'ceil') | int)) %}
+        <div class="rankcard">
+          <div class="rank-badge {{ 'p1' if page == 1 else ('p2' if page == 2 else 'p3') }}">
+            <div class="rank-pos">{{ r.latest }}</div>
+            <div class="rank-page">Page {{ page }}</div>
+          </div>
+          <div class="rank-mid">
+            <div class="rank-kw">{{ r.keyword }}</div>
+            <div class="rank-status">
+              {% if page == 1 %}🎉 You're on <strong>page 1</strong> for this search.
+              {% elif r.latest <= 15 %}Just off page 1 — <strong>close</strong>. A push here could land you on page 1.
+              {% elif page == 2 %}On <strong>page 2</strong> — climbing this onto page 1 is the big win.
+              {% else %}On page {{ page }} — early days for this search.{% endif %}
+            </div>
+            <div class="rank-sub muted">Google showed your page for this search <strong>{{ r.impressions }}</strong> time{{ '' if r.impressions == 1 else 's' }} in the last 7 days · {{ r.path }}</div>
+          </div>
+          <div class="rank-trend">
+            {% if r.spark %}<svg viewBox="0 0 120 26" style="width:110px; height:24px;"><polyline points="{{ r.spark }}" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linejoin="round"/></svg>{% endif %}
+            <div style="margin-top:4px;">
+              {% if r.snaps < 2 %}<span class="muted" style="font-size:12px;">first check — trend builds weekly</span>
+              {% elif r.delta > 0 %}<span style="color:#0a9b6d; font-weight:700;">▲ up {{ r.delta }} spot{{ '' if r.delta == 1 else 's' }}</span>
+              {% elif r.delta < 0 %}<span style="color:#dc4664; font-weight:700;">▼ down {{ -r.delta }}</span>
+              {% else %}<span class="muted" style="font-size:12px;">no change yet</span>{% endif %}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
       </div>
       {% else %}
-      <div class="empty">No position data yet — Google hasn't shown these pages for their target queries in the last 7 days (or Google isn't connected). Snapshots build automatically on every weekly run.</div>
+      <div class="empty">
+        <p style="margin:0 0 6px;"><strong>No position data yet.</strong></p>
+        <p class="muted" style="margin:0; font-size:13px;">This fills in once Google has shown your pages in search results for their target keywords (usually a week or two for a newer site), and once Google Search Console is connected. It then updates on its own every week.</p>
+      </div>
       {% endif %}
     </div>
   </details>
@@ -520,6 +538,24 @@
   .fc-input { display:flex; gap:8px; padding:13px; border-top:1px solid var(--border); background:#fff; align-items:flex-end; }
   .fc-input textarea { flex:1; min-width:0; padding:11px 14px; font-size:14px; resize:none; line-height:1.5;
     max-height:170px; overflow-y:auto; }
+  .rankcard { display:flex; align-items:center; gap:16px; background:var(--panel-2); border:1px solid var(--border); border-radius:14px; padding:14px 16px; }
+  .rank-badge { flex:none; width:74px; text-align:center; border-radius:12px; padding:8px 4px; color:#fff; }
+  .rank-badge.p1 { background:linear-gradient(135deg,#10b981,#059669); }
+  .rank-badge.p2 { background:linear-gradient(135deg,#f59e0b,#d97706); }
+  .rank-badge.p3 { background:linear-gradient(135deg,#94a3b8,#64748b); }
+  .rank-pos { font-size:22px; font-weight:800; line-height:1; font-variant-numeric:tabular-nums; }
+  .rank-page { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; opacity:.95; margin-top:3px; }
+  .rank-mid { flex:1; min-width:0; }
+  .rank-kw { font-size:15px; font-weight:700; }
+  .rank-status { font-size:13px; margin-top:3px; }
+  .rank-sub { font-size:11.5px; margin-top:4px; }
+  .rank-trend { flex:none; text-align:right; min-width:120px; }
+  @media (max-width:640px){ .rankcard{ flex-wrap:wrap; } .rank-trend{ text-align:left; min-width:0; } }
+  .biz-run { margin-top:16px; }
+  .biz-run-label { font-size:13.5px; color:var(--text); margin-bottom:9px; font-weight:600; }
+  .biz-bar { height:9px; border-radius:999px; background:var(--panel-2); overflow:hidden; }
+  .biz-bar > i { display:block; height:100%; width:38%; border-radius:999px; background:var(--accent-grad); animation:bizslide 1.15s ease-in-out infinite; }
+  @keyframes bizslide { 0%{ margin-left:-38%; } 100%{ margin-left:100%; } }
   .fc-opts { display:flex; flex-direction:column; gap:7px; align-self:flex-start; max-width:92%; margin-top:-2px; }
   .fc-opt { text-align:left; background:#fff; border:1px solid var(--border); border-radius:11px;
     padding:9px 13px; cursor:pointer; font:inherit; transition:border-color .12s, background .12s; }
@@ -574,6 +610,32 @@
       })
       .catch(function(){ status.textContent = 'Could not reach the auditor — try again.'; });
   }
+
+  // Live progress for a running business audit — polls and reloads when done,
+  // so it never sits looking stuck.
+  (function(){
+    var el = document.getElementById('biz-run');
+    if (!el) return;
+    var runId = el.getAttribute('data-run');
+    if (!runId) return;
+    var label = document.getElementById('biz-run-label');
+    var tries = 0;
+    var iv = setInterval(function(){
+      tries++;
+      fetch('/sites/{{ site.id }}/business-status?run_id=' + runId, {credentials:'same-origin'})
+        .then(function(r){ return r.json(); })
+        .then(function(s){
+          if (s.label) label.textContent = '🔎 ' + s.label;
+          if (s.status === 'running') {
+            if (tries > 90) { clearInterval(iv); label.textContent = 'Taking longer than usual — refresh in a moment.'; }
+            return;
+          }
+          clearInterval(iv);
+          location.reload();  // completed or failed → render the result
+        })
+        .catch(function(){});
+    }, 2000);
+  })();
 
   function fcRemember(role, text) {
     fcStore.push({role: role, text: text});

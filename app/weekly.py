@@ -119,6 +119,22 @@ def run_weekly(site_id: int, weekly_run_id: int) -> None:
         except Exception:
             pass
 
+        # Phase 7 — Business Fitness re-score (only if the owner has set up the
+        # Business Auditor). Runs alongside SEO but stays a separate score.
+        try:
+            from .models import BusinessProfile
+            if db.query(BusinessProfile).filter(BusinessProfile.site_id == site_id).first():
+                from .business_brain import run_business_audit
+                bz = JobRun(site_id=site_id, kind="bizaudit", status="running",
+                            summary="Weekly business audit…")
+                db.add(bz)
+                db.commit()
+                db.refresh(bz)
+                run_business_audit(site_id, bz.id)  # synchronous within the weekly worker
+                steps.append("re-scored business fitness")
+        except Exception:
+            pass
+
         _phase("done", findings=issue_count, fixes=fixes_applied)
         weekly.status = "completed"
         weekly.summary = "Weekly run: " + ", ".join(steps) + "."

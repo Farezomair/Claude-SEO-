@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "biz-auditor-78"
+BUILD = "biz-progress-79"
 
 
 @app.get("/version")
@@ -558,9 +558,11 @@ def site_detail(
             }
         else:
             ctx["business_audit"] = None
-        ctx["business_running"] = (db.query(JobRun).filter(
-            JobRun.site_id == site_id, JobRun.kind == "bizaudit",
-            JobRun.status == "running").first() is not None)
+        _biz_run = (db.query(JobRun).filter(
+            JobRun.site_id == site_id, JobRun.kind == "bizaudit", JobRun.status == "running")
+            .order_by(JobRun.created_at.desc()).first())
+        ctx["business_running"] = _biz_run is not None
+        ctx["business_run_id"] = _biz_run.id if _biz_run else None
         from .models import KeywordTarget
         ctx["keyword_targets"] = (db.query(KeywordTarget)
                                   .filter(KeywordTarget.site_id == site_id)
