@@ -395,3 +395,41 @@ class BusinessFacts(Base):
     review_count = Column(String(12), default="")
     pricing_json = Column(Text, default="")         # JSON: [{"item": "...", "price": "..."}]
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class BusinessProfile(Base):
+    """What the business actually IS — captured in a short setup interview so the
+    Business Auditor can judge the site against the business model and goals, not
+    just SEO. One row per site."""
+
+    __tablename__ = "business_profiles"
+
+    id = Column(Integer, primary_key=True)
+    site_id = Column(Integer, ForeignKey("sites.id", ondelete="CASCADE"), nullable=False, unique=True)
+    business_type = Column(String(200), default="")      # e.g. "local service", "dropshipping store", "SaaS"
+    revenue_model = Column(String(300), default="")      # how it makes money
+    primary_goal = Column(String(300), default="")       # what the site should achieve (leads/sales/bookings)
+    audience = Column(String(300), default="")           # target customer
+    offerings = Column(Text, default="")                 # products/services offered
+    competitors_json = Column(Text, default="")          # JSON list of {name, url}
+    extra_notes = Column(Text, default="")
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class BusinessAudit(Base):
+    """A Business Fitness audit — scored SEPARATELY from SEO. Judges whether the
+    website serves the business (offer clarity, conversion path, trust, model fit,
+    differentiation) and how it compares to competitors."""
+
+    __tablename__ = "business_audits"
+
+    id = Column(Integer, primary_key=True)
+    site_id = Column(Integer, ForeignKey("sites.id", ondelete="CASCADE"), nullable=False)
+    score = Column(Integer, nullable=True)
+    grade = Column(String(2), default="")
+    categories_json = Column(Text, default="")           # [{label, score, note}]
+    findings_json = Column(Text, default="")             # [{severity, title, detail}]
+    competitors_json = Column(Text, default="")          # [{name, url, strengths, gaps_vs_you}]
+    summary = Column(Text, default="")
+    created_at = Column(DateTime, default=utcnow)

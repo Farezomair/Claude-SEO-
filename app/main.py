@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "fact-guard-77"
+BUILD = "biz-auditor-78"
 
 
 @app.get("/version")
@@ -542,6 +542,25 @@ def site_detail(
             ctx["facts"] = {}
         from .rank_tracker import rank_rows
         ctx["rank_rows"] = rank_rows(db, site_id)
+        # Business Auditor (separate from SEO): profile + latest fitness audit.
+        from .models import BusinessProfile
+        from .business_brain import latest_audit as _biz_latest
+        _bp = db.query(BusinessProfile).filter(BusinessProfile.site_id == site_id).first()
+        ctx["business_profile"] = _bp
+        _ba = _biz_latest(db, site_id)
+        if _ba:
+            ctx["business_audit"] = {
+                "score": _ba.score, "grade": _ba.grade, "summary": _ba.summary,
+                "created_at": _ba.created_at,
+                "categories": _json_or(_ba.categories_json, []),
+                "findings": _json_or(_ba.findings_json, []),
+                "competitors": _json_or(_ba.competitors_json, []),
+            }
+        else:
+            ctx["business_audit"] = None
+        ctx["business_running"] = (db.query(JobRun).filter(
+            JobRun.site_id == site_id, JobRun.kind == "bizaudit",
+            JobRun.status == "running").first() is not None)
         from .models import KeywordTarget
         ctx["keyword_targets"] = (db.query(KeywordTarget)
                                   .filter(KeywordTarget.site_id == site_id)
@@ -2206,6 +2225,104 @@ def amend(approval_id: int, request: Request, instructions: str = Form(""),
     db.commit()
     start_amend_async(approval_id, instructions)
     return RedirectResponse(_with_notice(ret, "amending"), status_code=303)
+
+
+def _json_or(s, default):
+    try:
+        return json.loads(s) if s else default
+    except Exception:
+        return default
+
+
+@app.get("/sites/{site_id}/business/interview")
+def business_interview(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """Read the site and return the setup interview (detected type + questions
+    with suggested answers + proposed competitors)."""
+    if not current_user(request):
+        return JSONResponse({"error": "auth"}, status_code=401)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return JSONResponse({"error": "unknown site"}, status_code=404)
+    try:
+        from .business_brain import interview
+        return JSONResponse(interview(site.url, site.name))
+    except Exception as exc:
+        return JSONResponse({"error": f"{exc.__class__.__name__}"}, status_code=500)
+
+
+@app.post("/sites/{site_id}/business/setup")
+def business_setup(site_id: int, request: Request,
+                   business_type: str = Form(""), revenue_model: str = Form(""),
+                   primary_goal: str = Form(""), audience: str = Form(""),
+                   offerings: str = Form(""), competitors: str = Form(""),
+                   extra_notes: str = Form(""), db: Session = Depends(get_db)):
+    """Save the business profile from the interview answers."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    from .models import BusinessProfile
+    bp = db.query(BusinessProfile).filter(BusinessProfile.site_id == site_id).first()
+    if not bp:
+        bp = BusinessProfile(site_id=site_id)
+        db.add(bp)
+    comps = []
+    for line in (competitors or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # "Name | https://url" or just a url or just a name
+        if "|" in line:
+            nm, url = line.split("|", 1)
+            comps.append({"name": nm.strip()[:120], "url": url.strip()[:300]})
+        elif line.startswith(("http://", "https://")):
+            comps.append({"name": "", "url": line[:300]})
+        else:
+            comps.append({"name": line[:120], "url": ""})
+    bp.business_type, bp.revenue_model = business_type.strip(), revenue_model.strip()
+    bp.primary_goal, bp.audience = primary_goal.strip(), audience.strip()
+    bp.offerings, bp.extra_notes = offerings.strip(), extra_notes.strip()
+    bp.competitors_json = json.dumps(comps[:8])
+    db.commit()
+    # Kick off the first business audit right away.
+    run = JobRun(site_id=site_id, kind="bizaudit", status="running",
+                 summary="Running the first business audit\u2026")
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    from .business_brain import start_business_audit_async
+    start_business_audit_async(site_id, run.id)
+    return RedirectResponse(f"/sites/{site_id}?tab=command&notice=biz_setup", status_code=303)
+
+
+@app.post("/sites/{site_id}/run-business-audit")
+def run_business_audit_now(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """Re-run the Business Fitness audit (separate from SEO)."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+    already = (db.query(JobRun).filter(JobRun.site_id == site_id, JobRun.kind == "bizaudit",
+                                       JobRun.status == "running").first())
+    if not already:
+        run = JobRun(site_id=site_id, kind="bizaudit", status="running",
+                     summary="Running the business audit\u2026")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        from .business_brain import start_business_audit_async
+        start_business_audit_async(site_id, run.id)
+    return RedirectResponse(f"/sites/{site_id}?tab=command", status_code=303)
+
+
+@app.get("/sites/{site_id}/business-status")
+def business_status(site_id: int, run_id: int, request: Request, db: Session = Depends(get_db)):
+    if not current_user(request):
+        return JSONResponse({"error": "auth"}, status_code=401)
+    run = db.get(JobRun, run_id)
+    if not run or run.site_id != site_id or run.kind != "bizaudit":
+        return JSONResponse({"error": "unknown run"}, status_code=404)
+    return JSONResponse({"status": run.status, "summary": run.summary or "",
+                         "label": run.progress_label or ""})
 
 
 @app.post("/sites/{site_id}/business-facts")

@@ -86,6 +86,93 @@
   <div class="empty">No audit yet — click <strong>Run audit &amp; fix</strong> to scan the site, fix what's safe, and queue the rest.</div>
   {% endif %}
 
+  <!-- Business Fitness — a SEPARATE score from SEO -->
+  <div class="card" id="biz-card">
+    <div class="row-between" style="align-items:flex-start;">
+      <div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <h2 style="margin:0;">Business Fitness</h2>
+          {% if business_audit %}<span class="grade-chip grade-{{ business_audit.grade }}">{{ business_audit.grade }}</span>{% endif %}
+          <span class="lane" style="background:#eef0f6; color:#5b6472;">separate from SEO</span>
+        </div>
+        <p class="muted" style="margin:6px 0 0; font-size:13px;">How the site performs <strong>as a business</strong> — model fit, offer, conversion, trust, and vs competitors. Does not affect your SEO score.</p>
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        {% if business_profile %}
+        <form method="post" action="/sites/{{ site.id }}/run-business-audit"><button class="btn secondary small" type="submit" {{ 'disabled' if business_running else '' }}>{{ 'Auditing…' if business_running else '↻ Re-run business audit' }}</button></form>
+        <button class="btn secondary small" type="button" onclick="bizSetup()">Edit setup</button>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if not business_profile %}
+    <div class="empty" style="margin-top:16px;">
+      <p style="margin:0 0 12px;">Set up the Business Auditor so it understands your business, then it scores how well the site serves it and how you compare to competitors.</p>
+      <button class="btn" type="button" id="biz-setup-btn" onclick="bizSetup()">Set up the Business Auditor</button>
+    </div>
+    {% elif business_running and not business_audit %}
+    <div class="empty" style="margin-top:16px;">Running the first business audit… <span class="muted">this reads your site and competitors — give it a moment, then refresh.</span></div>
+    {% elif business_audit %}
+    <div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap; margin-top:8px;">
+      <div class="score-ring grade-{{ business_audit.grade }}" style="--p:{{ business_audit.score }};">
+        <div class="score-num">{{ business_audit.score }}</div><div class="score-lbl">/ 100</div>
+      </div>
+      <div style="flex:1; min-width:260px;">
+        <div class="cat-bars">
+          {% for c in business_audit.categories %}
+          <div class="cat-row">
+            <span class="cat-name" title="{{ c.note }}">{{ c.label }}</span>
+            <span class="cat-track"><i style="width:{{ c.score }}%;"></i></span>
+            <span class="cat-score">{{ c.score }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    {% if business_audit.summary %}<p class="cc-narrative">{{ business_audit.summary }}</p>{% endif %}
+
+    {% if business_audit.competitors %}
+    <h3 style="margin-top:18px;">Competitor gaps</h3>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      {% for cp in business_audit.competitors %}
+      <div class="req-row" style="align-items:flex-start;">
+        <div style="min-width:150px;"><strong style="font-size:13px;">{{ cp.name or cp.url }}</strong>{% if cp.url %}<div class="muted" style="font-size:11px;">{{ cp.url }}</div>{% endif %}</div>
+        <div style="flex:1; font-size:12.5px;">
+          {% if cp.strengths %}<div><span class="muted">Strong at:</span> {{ cp.strengths }}</div>{% endif %}
+          {% if cp.gaps_vs_you %}<div style="color:#b45309; margin-top:2px;"><span class="muted">You lack:</span> {{ cp.gaps_vs_you }}</div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if business_audit.findings %}
+    <h3 style="margin-top:18px;">What to fix (business, not SEO)</h3>
+    <ul class="prio-list">
+      {% for f in business_audit.findings %}
+      <li class="prio-item">
+        <span class="prio-sev sev-{{ f.severity }}">{{ f.severity }}</span>
+        <div><div class="prio-body">{{ f.title }}</div><div class="prio-meta">{{ f.detail }}</div></div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% endif %}
+
+    <!-- setup interview (JS-populated) -->
+    <div id="biz-interview" style="display:none; margin-top:16px; border-top:1px solid var(--border); padding-top:16px;">
+      <p class="muted" id="biz-int-status" style="font-size:13px;">Reading your site to understand the business…</p>
+      <form method="post" action="/sites/{{ site.id }}/business/setup" id="biz-form" style="display:none;">
+        <div id="biz-fields" style="display:flex; flex-direction:column; gap:12px;"></div>
+        <div class="field" style="margin-top:12px;"><label>Competitors <span class="muted">— one per line: "Name | https://url", a URL, or just a name</span></label>
+          <textarea name="competitors" id="biz-comp" rows="4" placeholder="Acme Outdoor Kitchens | https://acme.com"></textarea></div>
+        <div class="field"><label>Anything else the auditor should know? <span class="muted">(optional)</span></label>
+          <textarea name="extra_notes" rows="2"></textarea></div>
+        <button class="btn" type="submit">Save &amp; run business audit</button>
+      </form>
+    </div>
+  </div>
+
   <!-- Full report (expandable) -->
   {% if audit_roadmap or findings or chart %}
   <details class="cc-panel">
@@ -448,6 +535,45 @@
   var fcStore = [];
   try { fcStore = JSON.parse(localStorage.getItem(FC_KEY) || '[]') || []; } catch (e) { fcStore = []; }
   var fcHistory = [];
+
+  // ── Business Auditor setup interview ──
+  var BIZ_FIELDS = ['business_type', 'revenue_model', 'primary_goal', 'audience', 'offerings'];
+  var bizLoaded = false;
+  function bizEsc(s){ var d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML; }
+  function bizSetup() {
+    var box = document.getElementById('biz-interview');
+    box.style.display = 'block';
+    box.scrollIntoView({behavior:'smooth', block:'center'});
+    if (bizLoaded) return;
+    bizLoaded = true;
+    var status = document.getElementById('biz-int-status');
+    var form = document.getElementById('biz-form');
+    var fields = document.getElementById('biz-fields');
+    fetch('/sites/{{ site.id }}/business/interview', {credentials:'same-origin'})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (d.error) { status.textContent = 'Could not read the site automatically — fill this in yourself.'; d = {fields:{}, suggested_competitors:[]}; }
+        else { status.innerHTML = 'I read your site and it looks like: <strong>' + bizEsc(d.detected_type || 'a business') + '</strong>. Confirm or correct the details below.'; }
+        var f = d.fields || {};
+        BIZ_FIELDS.forEach(function(key){
+          var meta = f[key] || {};
+          var label = meta.label || key.replace(/_/g,' ');
+          var big = (key === 'offerings');
+          var wrap = document.createElement('div');
+          wrap.className = 'field';
+          wrap.innerHTML = '<label>' + bizEsc(label) + '</label>' +
+            (big ? '<textarea name="'+key+'" rows="2"></textarea>' : '<input type="text" name="'+key+'">');
+          fields.appendChild(wrap);
+          wrap.querySelector(big ? 'textarea' : 'input').value = meta.suggestion || '';
+        });
+        var comps = (d.suggested_competitors || []).map(function(c){
+          return (c.name ? c.name : '') + (c.url ? ' | ' + c.url : '');
+        }).join('\n');
+        if (comps) document.getElementById('biz-comp').value = comps;
+        form.style.display = 'block';
+      })
+      .catch(function(){ status.textContent = 'Could not reach the auditor — try again.'; });
+  }
 
   function fcRemember(role, text) {
     fcStore.push({role: role, text: text});
