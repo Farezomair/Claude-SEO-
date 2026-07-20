@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Grow · Ascend{% endblock %}
+{% block body %}
+<div class="container wide">
+  {% if not site %}
+  <div class="card"><h1 style="margin:0 0 6px;">Grow</h1><p class="muted" style="margin:0;">Add a website first, then this becomes your growth dashboard.</p></div>
+  {% else %}
+
+  <div class="card" style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+    <div>
+      <h1 style="margin:0 0 4px;">📈 Grow {{ site.name }}</h1>
+      <p class="muted" style="margin:0;">Your plan to climb Google and win more business — targets, live positions, and the next moves that matter.</p>
+    </div>
+    {% if sites and sites|length > 1 %}
+    <form method="get" action="/grow">
+      <select name="site_id" onchange="this.form.submit()" style="padding:9px 12px; border-radius:10px; border:1px solid #d9deeb; background:#fff; font:inherit; font-size:13px;">
+        {% for s in sites %}<option value="{{ s.id }}" {{ 'selected' if s.id == site.id else '' }}>{{ s.name }}</option>{% endfor %}
+      </select>
+    </form>
+    {% endif %}
+  </div>
+
+  <!-- Next steps -->
+  <div class="card">
+    <h2 style="margin:0 0 4px;">Your next moves</h2>
+    <p class="muted" style="margin:0 0 14px; font-size:13px;">The highest-impact things to do next, based on your live rankings and business plan.</p>
+    {% if playbook %}
+    <ol class="grow-steps">
+      {% for p in playbook %}
+      <li class="grow-step">
+        <span class="grow-tag grow-{{ p.kind }}">{{ p.tag }}</span>
+        <div><div class="grow-title">{{ p.title }}</div>{% if p.detail %}<div class="muted" style="font-size:12.5px; margin-top:2px;">{{ p.detail }}</div>{% endif %}</div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <div class="empty">Run an audit and connect Google Search Console, and your growth moves will appear here.</div>
+    {% endif %}
+  </div>
+
+  <!-- Where you rank -->
+  <div class="card">
+    <h2 style="margin:0 0 4px;">Where you show up on Google</h2>
+    <p style="margin:0 0 14px; font-size:13px; line-height:1.6;">The searches you're trying to win. <strong>Position 1–10 is the first page</strong> (where nearly all clicks go). Lower is better. Checked weekly from Google.</p>
+    <form method="post" action="/sites/{{ site.id }}/track-ranks" style="margin:0 0 14px;"><button class="btn secondary small" type="submit">↻ Check my Google positions now</button></form>
+    {% if rank_rows %}
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      {% for r in rank_rows %}
+      {% set page = 1 if r.latest <= 10 else (2 if r.latest <= 20 else ((r.latest / 10) | round(0, 'ceil') | int)) %}
+      <div class="rankcard">
+        <div class="rank-badge {{ 'p1' if page == 1 else ('p2' if page == 2 else 'p3') }}">
+          <div class="rank-pos">{{ r.latest }}</div><div class="rank-page">Page {{ page }}</div>
+        </div>
+        <div class="rank-mid">
+          <div class="rank-kw">{{ r.keyword }}</div>
+          <div class="rank-status">
+            {% if page == 1 %}🎉 You're on <strong>page 1</strong> for this search.
+            {% elif r.latest <= 15 %}Just off page 1 — <strong>close</strong>.
+            {% elif page == 2 %}On <strong>page 2</strong> — the big win is getting this to page 1.
+            {% else %}On page {{ page }} — early days.{% endif %}
+          </div>
+          <div class="rank-sub muted">Shown <strong>{{ r.impressions }}</strong> time{{ '' if r.impressions == 1 else 's' }} in the last 7 days · {{ r.path }}</div>
+        </div>
+        <div class="rank-trend">
+          {% if r.spark %}<svg viewBox="0 0 120 26" style="width:110px; height:24px;"><polyline points="{{ r.spark }}" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linejoin="round"/></svg>{% endif %}
+          <div style="margin-top:4px;">
+            {% if r.snaps < 2 %}<span class="muted" style="font-size:12px;">first check</span>
+            {% elif r.delta > 0 %}<span style="color:#0a9b6d; font-weight:700;">▲ up {{ r.delta }}</span>
+            {% elif r.delta < 0 %}<span style="color:#dc4664; font-weight:700;">▼ down {{ -r.delta }}</span>
+            {% else %}<span class="muted" style="font-size:12px;">no change</span>{% endif %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty"><strong>No position data yet.</strong><br><span class="muted" style="font-size:13px;">This fills in once Google shows your pages in results for their target keywords (a week or two for a newer site) and Search Console is connected. Then it updates weekly.</span></div>
+    {% endif %}
+  </div>
+
+  <!-- Keyword targets -->
+  <div class="card">
+    <h2 style="margin:0 0 4px;">Keyword targets <span class="pill-count" style="margin-left:4px;">{{ keyword_targets|length }}</span></h2>
+    <p class="muted" style="margin:0 0 14px; font-size:13px;">The Google searches each page is built to win. Ascend writes titles, descriptions, and content to rank for these.</p>
+    <form method="post" action="/sites/{{ site.id }}/build-keywords" style="margin:0 0 14px;"><button class="btn secondary small" type="submit">🧠 {{ 'Rebuild keyword map' if keyword_targets else 'Build keyword map' }}</button></form>
+    {% if keyword_targets %}
+    <div class="card" style="padding:0; margin:0;">
+      <table>
+        <thead><tr><th>Target search</th><th>Page</th></tr></thead>
+        <tbody>
+          {% for k in keyword_targets %}
+          <tr><td style="font-weight:600;">{{ k.primary_kw }}</td><td class="muted" style="font-size:12.5px;">{{ k.page_path }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty">No keyword map yet — it builds automatically on the weekly run, or from the business profile + Search Console.</div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<style>
+  .grow-steps { list-style:none; counter-reset:g; padding:0; margin:0; display:flex; flex-direction:column; gap:10px; }
+  .grow-step { display:flex; align-items:flex-start; gap:12px; background:var(--panel-2); border:1px solid var(--border); border-radius:12px; padding:13px 15px; }
+  .grow-tag { flex:none; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; padding:3px 9px; border-radius:999px; margin-top:1px; }
+  .grow-win { background:#e5f6ef; color:#087443; }
+  .grow-push { background:#fef3e2; color:#b45309; }
+  .grow-build { background:#e6f2fb; color:#0369a1; }
+  .grow-strategy { background:#eef0f6; color:#5b6472; }
+  .grow-title { font-size:14px; font-weight:600; }
+  .rankcard { display:flex; align-items:center; gap:16px; background:var(--panel-2); border:1px solid var(--border); border-radius:14px; padding:14px 16px; }
+  .rank-badge { flex:none; width:74px; text-align:center; border-radius:12px; padding:8px 4px; color:#fff; }
+  .rank-badge.p1 { background:linear-gradient(135deg,#10b981,#059669); }
+  .rank-badge.p2 { background:linear-gradient(135deg,#f59e0b,#d97706); }
+  .rank-badge.p3 { background:linear-gradient(135deg,#94a3b8,#64748b); }
+  .rank-pos { font-size:22px; font-weight:800; line-height:1; font-variant-numeric:tabular-nums; }
+  .rank-page { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; opacity:.95; margin-top:3px; }
+  .rank-mid { flex:1; min-width:0; }
+  .rank-kw { font-size:15px; font-weight:700; }
+  .rank-status { font-size:13px; margin-top:3px; }
+  .rank-sub { font-size:11.5px; margin-top:4px; }
+  .rank-trend { flex:none; text-align:right; min-width:120px; }
+  @media (max-width:640px){ .rankcard{ flex-wrap:wrap; } .rank-trend{ text-align:left; min-width:0; } }
+</style>
+{% endblock %}

@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "brain-80"
+BUILD = "grow-page-81"
 
 
 @app.get("/version")
@@ -207,6 +207,59 @@ def logout(request: Request):
 @app.get("/")
 def root(request: Request):
     return RedirectResponse("/sites" if current_user(request) else "/login", status_code=303)
+
+
+@app.get("/grow", response_class=HTMLResponse)
+def grow(request: Request, site_id: int = 0, db: Session = Depends(get_db)):
+    """The Grow dashboard — keyword targets, live Google positions, and the
+    highest-impact next moves, off the main site page."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    sites = db.query(Site).order_by(Site.created_at.desc()).all()
+    site = next((s for s in sites if s.id == site_id), None) or (sites[0] if sites else None)
+    ctx = {"request": request, "user": current_user(request), "nav": "grow",
+           "pending_count": db.query(Approval).filter(Approval.status == "pending").count(),
+           "sites": sites, "site": site, "rank_rows": [], "keyword_targets": [], "playbook": []}
+    if site:
+        from .rank_tracker import rank_rows
+        from .models import KeywordTarget
+        rows = rank_rows(db, site.id)
+        targets = (db.query(KeywordTarget).filter(KeywordTarget.site_id == site.id)
+                   .order_by(KeywordTarget.page_path).all())
+        ctx["rank_rows"] = rows
+        ctx["keyword_targets"] = targets
+        # Derive the next-moves playbook from real data (no AI call needed).
+        play = []
+        for r in rows:
+            if 10 < r["latest"] <= 20:
+                play.append({"kind": "push", "tag": "Push", "title": f"Get “{r['keyword']}” onto page 1",
+                             "detail": f"You're at position {r['latest']} — close. Strengthen this page and add internal links to it."})
+            elif r["latest"] <= 3.5:
+                play.append({"kind": "win", "tag": "Win", "title": f"Defend your top-3 spot for “{r['keyword']}”",
+                             "detail": f"Position {r['latest']} — keep the page fresh so you hold it."})
+            elif r["latest"] <= 10:
+                play.append({"kind": "push", "tag": "Climb", "title": f"Climb “{r['keyword']}” into the top 3",
+                             "detail": f"On page 1 at {r['latest']} — the top 3 get most of the clicks."})
+        ranked_kws = {r["keyword"] for r in rows}
+        unranked = [t for t in targets if t.primary_kw not in ranked_kws]
+        if unranked:
+            play.append({"kind": "build", "tag": "Build", "title": f"Get your other {len(unranked)} target keyword(s) ranking",
+                         "detail": "These pages aren't showing in Google yet — Ascend's weekly run keeps optimizing them; give newer pages a few weeks."})
+        try:
+            from .business_brain import latest_audit as _bl
+            ba = _bl(db, site.id)
+            if ba and ba.findings_json:
+                for f in (json.loads(ba.findings_json) or [])[:2]:
+                    play.append({"kind": "build", "tag": "Business", "title": f.get("title", ""),
+                                 "detail": f.get("detail", "")[:160]})
+        except Exception:
+            pass
+        from .strategy_brain import is_configured, get_brain
+        if not is_configured(get_brain(db, site.id)):
+            play.insert(0, {"kind": "strategy", "tag": "Setup", "title": "Set up your Business Brain",
+                            "detail": "Tell Ascend your strategy (in Settings) so it grows the site your way and stops flagging things you've decided on purpose."})
+        ctx["playbook"] = play
+    return templates.TemplateResponse("grow.html", ctx)
 
 
 @app.get("/sites", response_class=HTMLResponse)
