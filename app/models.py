@@ -433,3 +433,17 @@ class BusinessAudit(Base):
     competitors_json = Column(Text, default="")          # [{name, url, strengths, gaps_vs_you}]
     summary = Column(Text, default="")
     created_at = Column(DateTime, default=utcnow)
+
+
+class BusinessBrain(Base):
+    """The strategy brain — an editable questionnaire the owner fills so the whole
+    app understands the business and stops countering the owner's strategy. Stored
+    as a flexible {question_key: answer} JSON so questions can evolve. Read by the
+    content generator, both auditors, and the approvals framing."""
+
+    __tablename__ = "business_brain"
+
+    id = Column(Integer, primary_key=True)
+    site_id = Column(Integer, ForeignKey("sites.id", ondelete="CASCADE"), nullable=False, unique=True)
+    answers_json = Column(Text, default="")
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)

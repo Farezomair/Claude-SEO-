@@ -86,7 +86,13 @@ def _facts_for(db, site_id: int):
     try:
         from .business_facts import get_facts, facts_block, allowed_values
         bf = get_facts(db, site_id)
-        return facts_block(bf), allowed_values(bf)
+        block = facts_block(bf)
+        try:
+            from .strategy_brain import brain_context
+            block += brain_context(db, site_id)
+        except Exception:
+            pass
+        return block, allowed_values(bf)
     except Exception:
         return "", set()
 

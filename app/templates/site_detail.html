@@ -451,6 +451,36 @@
         <div class="notice notice-muted">Google isn't set up yet (one-time OAuth client needed in Railway).</div>
       {% endif %}
 
+      <h3 style="margin-top:24px;">🧠 Business Brain <span class="lane" style="background:{{ '#e5f6ef' if brain_configured else '#eef0f6' }}; color:{{ '#087443' if brain_configured else '#5b6472' }};">{{ 'configured' if brain_configured else 'not set up' }}</span></h3>
+      <p class="muted" style="margin-top:-2px; font-size:13px;">Tell the app your strategy once. Every part of Ascend — the auditors, the content writer, the recommendations — reads this so it works <strong>with</strong> your plan instead of flagging things you've decided on purpose. Editable anytime.</p>
+      {% if notice == 'brain_saved' %}<div class="notice notice-success">✓ Business Brain saved — the app now understands your strategy.</div>{% endif %}
+      <form method="post" action="/sites/{{ site.id }}/business-brain" style="margin-top:12px;">
+        {% for q in brain_questions %}
+        <div class="field">
+          <label>{{ q.q }}{% if q.help %} <span class="muted" style="font-weight:400;">— {{ q.help }}</span>{% endif %}</label>
+          {% if q.type == 'select' %}
+          <select name="{{ q.key }}" style="width:100%; padding:11px 14px; border-radius:11px; border:1px solid #d9deeb; background:#fff; color:var(--text); font:inherit; font-size:14px;">
+            <option value="">— choose —</option>
+            {% for opt in q.options %}<option value="{{ opt }}" {{ 'selected' if brain_answers.get(q.key) == opt else '' }}>{{ opt }}</option>{% endfor %}
+          </select>
+          {% elif q.type == 'multi' %}
+          <div style="display:flex; flex-direction:column; gap:6px; margin-top:2px;">
+            {% for opt in q.options %}
+            <label style="font-weight:400; display:flex; align-items:center; gap:8px; margin:0;">
+              <input type="checkbox" name="{{ q.key }}" value="{{ opt }}" {{ 'checked' if opt in (brain_answers.get(q.key) or []) else '' }}> {{ opt }}
+            </label>
+            {% endfor %}
+          </div>
+          {% elif q.type == 'textarea' %}
+          <textarea name="{{ q.key }}" rows="2" placeholder="{{ q.placeholder or '' }}">{{ brain_answers.get(q.key) or '' }}</textarea>
+          {% else %}
+          <input type="text" name="{{ q.key }}" value="{{ brain_answers.get(q.key) or '' }}" placeholder="{{ q.placeholder or '' }}">
+          {% endif %}
+        </div>
+        {% endfor %}
+        <button class="btn" type="submit">Save Business Brain</button>
+      </form>
+
       <h3 style="margin-top:24px;">Verified business facts</h3>
       <p class="muted" style="margin-top:-2px; font-size:13px;">The single source of truth for real-world facts. The content agent may state <strong>only</strong> what you enter here — anything left blank is omitted, never invented. Leave the street blank if you're a service-area business.</p>
       {% if notice == 'facts_saved' %}<div class="notice notice-success">✓ Business facts saved.</div>{% endif %}

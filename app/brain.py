@@ -577,7 +577,8 @@ At most 4 findings. Only include REAL problems (omit findings if the page is str
     }
 
 
-def summarize_health(site_name: str, score: int, grade: str, categories: list, roadmap: list) -> str:
+def summarize_health(site_name: str, score: int, grade: str, categories: list, roadmap: list,
+                     brain: str = "") -> str:
     """One to two plain-English paragraphs: how the site is doing, where it's strong,
     where it's weakest, and the business impact. Shown under the health score."""
     cats = "; ".join(f"{c.get('label')} {c.get('score')}/100" for c in (categories or []))
@@ -589,7 +590,7 @@ Overall health: {score}/100 (grade {grade})
 Category scores: {cats or "(none)"}
 Top issues: {tops or "(none)"}
 
-Write 1-2 short paragraphs (about 60-110 words total) that tell the owner: how the site is doing overall, what it's doing well, where it's weakest, and what the real-world impact is (visibility in Google / AI search, trust, conversions). End with the single most important thing to fix first. Plain language, second person ("your site"). No headings, no lists, no markdown."""
+Write 1-2 short paragraphs (about 60-110 words total) that tell the owner: how the site is doing overall, what it's doing well, where it's weakest, and what the real-world impact is (visibility in Google / AI search, trust, conversions). End with the single most important thing to fix first. Plain language, second person ("your site"). No headings, no lists, no markdown.{brain}"""
     try:
         response = _get_client().messages.create(
             model=ANTHROPIC_MODEL, max_tokens=400,

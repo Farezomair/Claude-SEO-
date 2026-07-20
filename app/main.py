@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "biz-progress-79"
+BUILD = "brain-80"
 
 
 @app.get("/version")
@@ -542,6 +542,12 @@ def site_detail(
             ctx["facts"] = {}
         from .rank_tracker import rank_rows
         ctx["rank_rows"] = rank_rows(db, site_id)
+        # Strategy Brain — the editable questionnaire the whole app reads.
+        from .strategy_brain import BRAIN_QUESTIONS, get_brain, answers_of, is_configured
+        _brain = get_brain(db, site_id)
+        ctx["brain_questions"] = BRAIN_QUESTIONS
+        ctx["brain_answers"] = answers_of(_brain)
+        ctx["brain_configured"] = is_configured(_brain)
         # Business Auditor (separate from SEO): profile + latest fitness audit.
         from .models import BusinessProfile
         from .business_brain import latest_audit as _biz_latest
@@ -2325,6 +2331,28 @@ def business_status(site_id: int, run_id: int, request: Request, db: Session = D
         return JSONResponse({"error": "unknown run"}, status_code=404)
     return JSONResponse({"status": run.status, "summary": run.summary or "",
                          "label": run.progress_label or ""})
+
+
+@app.post("/sites/{site_id}/business-brain")
+async def save_business_brain(site_id: int, request: Request, db: Session = Depends(get_db)):
+    """Save the Strategy Brain questionnaire (editable) — the context the whole
+    app reads so it works with the owner's strategy instead of against it."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    from .strategy_brain import BRAIN_QUESTIONS, save_brain
+    form = await request.form()
+    answers = {}
+    for q in BRAIN_QUESTIONS:
+        if q["type"] == "multi":
+            vals = form.getlist(q["key"])
+            if vals:
+                answers[q["key"]] = list(vals)
+        else:
+            v = form.get(q["key"], "")
+            if v:
+                answers[q["key"]] = v
+    save_brain(db, site_id, answers)
+    return RedirectResponse(f"/sites/{site_id}?tab=settings&notice=brain_saved", status_code=303)
 
 
 @app.post("/sites/{site_id}/business-facts")

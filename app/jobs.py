@@ -124,8 +124,10 @@ def _run_audit(site_id: int, audit_id: int, start_url: str, progress_run_id: int
         try:
             from .brain import summarize_health
             site = db.get(Site, site_id)
+            from .strategy_brain import brain_context_str
+            _brain = brain_context_str(site_id)
             audit.narrative = summarize_health(site.name if site else "", scored["overall"],
-                                                scored["grade"], scored["categories"], scored["roadmap"])
+                                                scored["grade"], scored["categories"], scored["roadmap"], brain=_brain)
         except Exception:
             audit.narrative = ""
 

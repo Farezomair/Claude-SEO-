@@ -152,6 +152,11 @@ def run_business_audit(site_id: int, run_id: int) -> None:
         _label("Reading the website…")
         snap = _site_snapshot(site.url)
         try:
+            from .strategy_brain import brain_context
+            _brain = brain_context(db, site_id)
+        except Exception:
+            _brain = ""
+        try:
             competitors = json.loads(prof.competitors_json or "[]")
         except Exception:
             competitors = []
@@ -170,6 +175,7 @@ THE BUSINESS (owner-confirmed):
 - Target customer: {prof.audience}
 - Offerings: {prof.offerings}
 - Notes: {prof.extra_notes or '(none)'}
+{_brain}
 
 WHAT THE SITE CURRENTLY SHOWS:
 \"\"\"{snap or '(could not read the site)'}\"\"\"
