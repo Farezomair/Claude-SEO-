@@ -250,25 +250,16 @@
         <div class="empty">Nothing waiting. Run an audit & fix, and proposed changes land here.</div>
       {% endif %}
 
-      {% if human_tasks %}
-        <h3>Needs your attention</h3>
-        <p class="muted" style="margin-top:-2px;">Real-world facts only you can provide (a real phone, license, address, prices). They recur each audit until fixed on the site.</p>
-        {% for t in human_tasks %}
-        <div class="card" style="border-left:3px solid var(--warning);">
-          <div class="row-between"><strong>{{ t.site.name }}</strong><span>{{ t.finding.severity | badge }}</span></div>
-          <p style="margin:8px 0 4px;">{{ t.finding.issue }}</p>
-          {% if t.finding.evidence_url %}<p class="muted" style="margin:0; font-size:12px;">{{ t.finding.evidence_url }}</p>{% endif %}
-          <div style="display:flex; gap:8px; margin-top:12px;">
-            <form method="post" action="/findings/{{ t.finding.id }}/done"><button class="btn small" type="submit">Done — I fixed it</button></form>
-            <form method="post" action="/findings/{{ t.finding.id }}/snooze"><button class="btn secondary small" type="submit">I'll do it later</button></form>
-          </div>
-        </div>
-        {% endfor %}
+      {% if approval_items %}
+      <h3 style="display:flex; align-items:center; gap:8px;">✅ Ready to approve <span class="pill-count">{{ approval_items|length }}</span></h3>
+      <p class="muted" style="margin-top:-2px; font-size:13px;">The AI prepared these — one click applies each. Every card links to its page.</p>
       {% endif %}
 
       {% for item in approval_items %}
-      <div class="card">
-        <div class="row-between"><h3 style="margin:0;">{{ item.approval.title }}</h3><span class="muted" style="font-size:12px;">{{ item.approval.kind }}</span></div>
+      <div class="card" style="border-left:3px solid var(--accent);">
+        <div class="row-between"><h3 style="margin:0;">{{ item.approval.title }}</h3><span>{{ item.severity | badge }}</span></div>
+        <p class="muted" style="margin:2px 0 6px; font-size:12px;">{{ item.approval.kind }}</p>
+        {% if item.url %}<a href="{{ item.url }}" target="_blank" rel="noopener" style="font-size:12px; color:var(--accent); word-break:break-all;">🔗 {{ item.url }}</a>{% endif %}
         {% if item.approval.summary %}<p style="margin:8px 0;">{{ item.approval.summary }}</p>{% endif %}
         {% if item.text_diff %}
           <details><summary style="cursor:pointer; color:var(--accent);">What changed (text)</summary>
@@ -299,35 +290,38 @@
         {% endif %}
         <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:14px;">
           {% if k in ['content', 'required_page'] %}
-            <form method="post" action="/approvals/{{ item.approval.id }}/approve">
-              <input type="hidden" name="publish" value="1"><input type="hidden" name="return_to" value="{{ rt }}">
-              <button class="btn" type="submit">Approve &amp; publish live</button></form>
-            <form method="post" action="/approvals/{{ item.approval.id }}/approve">
-              <input type="hidden" name="publish" value="0"><input type="hidden" name="return_to" value="{{ rt }}">
-              <button class="btn secondary" type="submit">Approve &amp; save as draft</button></form>
+            <form method="post" action="/approvals/{{ item.approval.id }}/approve"><input type="hidden" name="publish" value="1"><input type="hidden" name="return_to" value="{{ rt }}"><button class="btn" type="submit">Approve &amp; publish live</button></form>
+            <form method="post" action="/approvals/{{ item.approval.id }}/approve"><input type="hidden" name="publish" value="0"><input type="hidden" name="return_to" value="{{ rt }}"><button class="btn secondary" type="submit">Save as draft</button></form>
           {% else %}
-            <form method="post" action="/approvals/{{ item.approval.id }}/approve">
-              <input type="hidden" name="publish" value="1"><input type="hidden" name="return_to" value="{{ rt }}">
-              <button class="btn" type="submit">Approve &amp; apply live</button></form>
+            <form method="post" action="/approvals/{{ item.approval.id }}/approve"><input type="hidden" name="publish" value="1"><input type="hidden" name="return_to" value="{{ rt }}"><button class="btn" type="submit">Approve &amp; apply live</button></form>
           {% endif %}
-          <form method="post" action="/approvals/{{ item.approval.id }}/reject">
-            <input type="hidden" name="return_to" value="{{ rt }}">
-            <button class="btn secondary" type="submit">Reject</button></form>
+          <form method="post" action="/approvals/{{ item.approval.id }}/reject"><input type="hidden" name="return_to" value="{{ rt }}"><button class="btn secondary" type="submit">Reject</button></form>
         </div>
         {% if k in ['content', 'required_page', 'content_fix', 'meta_rewrite', 'page_rewrite', 'schema_inject'] %}
-        <details style="margin-top:10px;">
-          <summary style="cursor:pointer; color:var(--accent);">Request amendment</summary>
-          <form method="post" action="/approvals/{{ item.approval.id }}/amend" style="margin-top:8px;">
-            <input type="hidden" name="return_to" value="{{ rt }}">
-            <textarea name="instructions" rows="3" required
-              placeholder="Tell the AI what to change — e.g. 'warmer tone and mention our 10-year warranty', 'shorter title', 'drop the FAQ section'…"
-              style="width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--border); border-radius:8px; background:#fff; color:var(--text); font:inherit;"></textarea>
-            <button class="btn small" type="submit" style="margin-top:8px;">Send to AI &amp; regenerate</button>
-          </form>
-        </details>
-        {% endif %}
+        <details style="margin-top:10px;"><summary style="cursor:pointer; color:var(--accent);">Request amendment</summary>
+          <form method="post" action="/approvals/{{ item.approval.id }}/amend" style="margin-top:8px;"><input type="hidden" name="return_to" value="{{ rt }}">
+            <textarea name="instructions" rows="3" required placeholder="Tell the AI what to change - e.g. 'warmer tone', 'shorter title', 'drop the FAQ'." style="width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--border); border-radius:8px; background:#fff; color:var(--text); font:inherit;"></textarea>
+            <button class="btn small" type="submit" style="margin-top:8px;">Send to AI &amp; regenerate</button></form>
+        </details>{% endif %}
       </div>
       {% endfor %}
+
+      {% if human_tasks %}
+        <h3 style="display:flex; align-items:center; gap:8px; margin-top:18px;">🙋 Needs your input <span class="pill-count">{{ human_tasks|length }}</span></h3>
+        <p class="muted" style="margin-top:-2px; font-size:13px;">Real facts only you can provide (a real phone, license, address, prices). The AI won't invent them; they recur each audit until fixed.</p>
+        {% for t in human_tasks %}
+        <div class="card" style="border-left:3px solid var(--warning);">
+          <div class="row-between"><strong>{{ t.site.name }}</strong><span>{{ t.finding.severity | badge }}</span></div>
+          <p style="margin:8px 0 4px;">{{ t.finding.issue }}</p>
+          {% if t.finding.evidence_url %}<a href="{{ t.finding.evidence_url }}" target="_blank" rel="noopener" style="font-size:12px; color:var(--accent); word-break:break-all;">🔗 {{ t.finding.evidence_url }}</a>{% endif %}
+          <div style="display:flex; gap:8px; margin-top:12px;">
+            <form method="post" action="/findings/{{ t.finding.id }}/done"><button class="btn small" type="submit">Done — I fixed it</button></form>
+            <form method="post" action="/findings/{{ t.finding.id }}/snooze"><button class="btn secondary small" type="submit">I'll do it later</button></form>
+          </div>
+        </div>
+        {% endfor %}
+      {% endif %}
+
     </div>
   </details>
 

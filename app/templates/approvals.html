@@ -2,128 +2,87 @@
 {% block title %}Approvals &middot; Ascend{% endblock %}
 {% block body %}
 <div class="container">
-  <h1>Approvals</h1>
-  <p class="muted" style="margin-top:0;">
-    Changes waiting for your yes or no. Approving content sends it to WordPress
-    {% if publish_status == 'publish' %}<strong>and publishes it live</strong>{% else %}as a <strong>draft</strong> (you give it a final look and hit Publish in WordPress){% endif %}.
-  </p>
+  <h1 style="margin-bottom:4px;">Approvals</h1>
+  <p class="muted" style="margin-top:0;">Two lanes: things the AI has prepared for a one-click yes, and things only you can supply. Every card links to the exact page it's about.</p>
 
   {% if notice == 'task_done' %}<div class="card"><p style="margin:0; color:#0a9b6d;">Marked done — the next audit will re-check it.</p></div>{% endif %}
   {% if notice == 'task_snoozed' %}<div class="card"><p style="margin:0;" class="muted">Deferred — it'll reappear after the next audit if still unfixed.</p></div>{% endif %}
-
-  {% if human_tasks %}
-    <h2 style="margin-top:8px;">Needs your attention</h2>
-    <p class="muted" style="margin-top:0;">These need a real-world fact only you can provide (a real phone number, license, address, prices) — the AI won't invent them. Each keeps reappearing after every audit until it's fixed on the site.</p>
-    {% for t in human_tasks %}
-    <div class="card" style="border-left:3px solid var(--warning);">
-      <div style="display:flex; justify-content:space-between; align-items:baseline;">
-        <strong>{{ t.site.name }}</strong>
-        <span>{{ t.finding.severity | badge }}</span>
-      </div>
-      <p style="margin:8px 0 4px;">{{ t.finding.issue }}</p>
-      {% if t.finding.evidence_url %}<p class="muted" style="margin:0; font-size:12px;">{{ t.finding.evidence_url }}</p>{% endif %}
-      <div style="display:flex; gap:8px; margin-top:14px;">
-        <form method="post" action="/findings/{{ t.finding.id }}/done">
-          <button class="btn" type="submit">Done — I fixed it</button>
-        </form>
-        <form method="post" action="/findings/{{ t.finding.id }}/snooze">
-          <button class="btn secondary" type="submit">I'll do it later</button>
-        </form>
-      </div>
-    </div>
-    {% endfor %}
-    <h2 style="margin-top:24px;">Approvals</h2>
-  {% endif %}
-
-  {% if notice == 'approved' %}<div class="card"><p style="margin:0; color:#0a9b6d;">Approved and sent to WordPress.</p></div>{% endif %}
+  {% if notice == 'approved' %}<div class="card"><p style="margin:0; color:#0a9b6d;">Approved and applied.</p></div>{% endif %}
   {% if notice == 'rejected' %}<div class="card"><p style="margin:0;" class="muted">Rejected and discarded.</p></div>{% endif %}
-  {% if notice == 'no_connection' %}<div class="card"><div class="error">Can't publish — that site has no WordPress connection. Set it up in the site's Settings tab.</div></div>{% endif %}
+  {% if notice == 'no_connection' %}<div class="card"><div class="error">Can't publish — that site has no WordPress connection (site Settings).</div></div>{% endif %}
   {% if notice == 'publish_fail' %}<div class="card"><div class="error">Approved, but sending to WordPress failed. Check the connection and try again.</div></div>{% endif %}
-  {% if notice == 'amending' %}<div class="card"><p style="margin:0; color:var(--accent);">Sent to the AI — your amendment is being written. Refresh in a moment to see the revised version.</p></div>{% endif %}
-  {% if notice == 'amend_empty' %}<div class="card"><div class="error">Tell the AI what to change first, then send.</div></div>{% endif %}
+  {% if notice == 'amending' %}<div class="card"><p style="margin:0; color:var(--accent);">Sent to the AI — your amendment is being written. Refresh in a moment.</p></div>{% endif %}
 
+  {% macro urlrow(u) %}{% if u %}<a href="{{ u }}" target="_blank" rel="noopener" class="appr-url">🔗 {{ u }}</a>{% endif %}{% endmacro %}
+
+  <!-- LANE 1: AI-ready -->
+  <div class="lane-head"><span class="lane-ico" style="background:#e6f2fb; color:#0369a1;">✅</span><h2 style="margin:0;">Ready to approve</h2><span class="pill-count">{{ items|length }}</span><span class="muted" style="font-size:13px;">AI prepared these — one click applies them</span></div>
   {% if items %}
     {% for item in items %}
-    <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:baseline;">
-        <h2 style="margin-bottom:4px;">{{ item.approval.title }}</h2>
-        <span class="muted">{{ item.site.name }}</span>
+    {% set k = item.approval.kind %}
+    <div class="card appr-card" style="border-left:3px solid var(--accent);">
+      <div class="row-between">
+        <h2 style="margin:0 0 2px; font-size:16px;">{{ item.approval.title }}</h2>
+        <span>{{ item.severity | badge }}</span>
       </div>
-      <p class="muted" style="margin-top:0;">{{ item.approval.kind }} &middot;
-        {{ item.approval.created_at.strftime('%Y-%m-%d %H:%M UTC') if item.approval.created_at else '' }}</p>
-      {% if item.approval.summary %}<p>{{ item.approval.summary }}</p>{% endif %}
-      {% if item.body %}
-        <details>
-          <summary style="cursor:pointer; color:var(--accent);">Preview content</summary>
-          <div style="border:1px solid var(--border); border-radius:8px; padding:16px; margin-top:12px; max-height:360px; overflow:auto; background:#fff; color:#111;">
-            {{ item.body | sanitize }}
-          </div>
-        </details>
-      {% endif %}
-      {% if item.code %}
-        <details>
-          <summary style="cursor:pointer; color:var(--accent);">Preview code</summary>
-          <pre style="border:1px solid var(--border); border-radius:8px; padding:16px; margin-top:12px; max-height:360px; overflow:auto; background:var(--panel-3); color:var(--text); font-size:13px; white-space:pre-wrap;">{{ item.code }}</pre>
-        </details>
-      {% endif %}
-      {% if item.text_diff %}
-        <details open>
-          <summary style="cursor:pointer; color:var(--accent);">What changed (text)</summary>
-          <pre style="border:1px solid var(--border); border-radius:8px; padding:16px; margin-top:12px; max-height:320px; overflow:auto; background:var(--panel-3); font-size:13px; white-space:pre-wrap; line-height:1.5;">{% for kind, line in item.text_diff %}{% if kind == 'add' %}<span style="color:#0a9b6d;">+ {{ line }}</span>
+      <p class="muted" style="margin:0 0 6px; font-size:12px;">{{ item.site.name }} &middot; {{ item.approval.kind }}</p>
+      {{ urlrow(item.url) }}
+      {% if item.approval.summary %}<p style="margin:10px 0 0;">{{ item.approval.summary }}</p>{% endif %}
+      {% if item.body %}<details><summary style="cursor:pointer; color:var(--accent);">Preview content</summary><div style="border:1px solid var(--border); border-radius:8px; padding:16px; margin-top:12px; max-height:360px; overflow:auto; background:#fff; color:#111;">{{ item.body | sanitize }}</div></details>{% endif %}
+      {% if item.code %}<details><summary style="cursor:pointer; color:var(--accent);">Preview code</summary><pre style="border:1px solid var(--border); border-radius:8px; padding:16px; margin-top:12px; max-height:360px; overflow:auto; background:var(--panel-3); color:var(--text); font-size:13px; white-space:pre-wrap;">{{ item.code }}</pre></details>{% endif %}
+      {% if item.text_diff %}<details open><summary style="cursor:pointer; color:var(--accent);">What changed</summary><pre style="border:1px solid var(--border); border-radius:8px; padding:16px; margin-top:12px; max-height:320px; overflow:auto; background:var(--panel-3); font-size:13px; white-space:pre-wrap; line-height:1.5;">{% for kind, line in item.text_diff %}{% if kind == 'add' %}<span style="color:#0a9b6d;">+ {{ line }}</span>
 {% elif kind == 'del' %}<span style="color:#dc4664;">- {{ line }}</span>
 {% else %}<span style="color:#6b7280;">  {{ line }}</span>
-{% endif %}{% endfor %}</pre>
-        </details>
-      {% endif %}
-      {% if item.preview_html %}
-        <details>
-          <summary style="cursor:pointer; color:var(--accent);">Preview rewritten page</summary>
-          <p class="muted" style="margin:8px 0 4px;">This is the new page, rendered. Scroll inside the frame to review the whole page before approving.</p>
-          <iframe srcdoc="{{ item.preview_html }}" sandbox="allow-same-origin"
-                  style="width:100%; height:520px; border:1px solid var(--border); border-radius:8px; background:#fff; margin-top:8px;"></iframe>
-        </details>
-        <details>
-          <summary style="cursor:pointer; color:var(--accent);">View HTML source</summary>
-          <pre style="border:1px solid var(--border); border-radius:8px; padding:16px; margin-top:12px; max-height:360px; overflow:auto; background:var(--panel-3); color:var(--text); font-size:12px; white-space:pre-wrap;">{{ item.preview_html }}</pre>
-        </details>
-      {% endif %}
-      {% set k = item.approval.kind %}
-      {% if item.approval.amend_note %}
-        <p class="muted" style="margin:10px 0 0; color:var(--accent);">{{ item.approval.amend_note }}</p>
-      {% endif %}
-      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:16px;">
+{% endif %}{% endfor %}</pre></details>{% endif %}
+      {% if item.preview_html %}<details><summary style="cursor:pointer; color:var(--accent);">Preview rewritten page</summary><iframe srcdoc="{{ item.preview_html }}" sandbox="allow-same-origin" style="width:100%; height:520px; border:1px solid var(--border); border-radius:8px; background:#fff; margin-top:8px;"></iframe></details>{% endif %}
+      {% if item.approval.amend_note %}<p class="muted" style="margin:10px 0 0; color:var(--accent);">{{ item.approval.amend_note }}</p>{% endif %}
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:14px;">
         {% if k in ['content', 'required_page'] %}
-          <form method="post" action="/approvals/{{ item.approval.id }}/approve">
-            <input type="hidden" name="publish" value="1"><input type="hidden" name="return_to" value="/approvals">
-            <button class="btn" type="submit">Approve &amp; publish live</button></form>
-          <form method="post" action="/approvals/{{ item.approval.id }}/approve">
-            <input type="hidden" name="publish" value="0"><input type="hidden" name="return_to" value="/approvals">
-            <button class="btn secondary" type="submit">Approve &amp; save as draft</button></form>
+          <form method="post" action="/approvals/{{ item.approval.id }}/approve"><input type="hidden" name="publish" value="1"><input type="hidden" name="return_to" value="/approvals"><button class="btn" type="submit">Approve &amp; publish live</button></form>
+          <form method="post" action="/approvals/{{ item.approval.id }}/approve"><input type="hidden" name="publish" value="0"><input type="hidden" name="return_to" value="/approvals"><button class="btn secondary" type="submit">Save as draft</button></form>
         {% else %}
-          <form method="post" action="/approvals/{{ item.approval.id }}/approve">
-            <input type="hidden" name="publish" value="1"><input type="hidden" name="return_to" value="/approvals">
-            <button class="btn" type="submit">Approve &amp; apply live</button></form>
+          <form method="post" action="/approvals/{{ item.approval.id }}/approve"><input type="hidden" name="publish" value="1"><input type="hidden" name="return_to" value="/approvals"><button class="btn" type="submit">Approve &amp; apply live</button></form>
         {% endif %}
-        <form method="post" action="/approvals/{{ item.approval.id }}/reject">
-          <input type="hidden" name="return_to" value="/approvals">
-          <button class="btn secondary" type="submit">Reject</button></form>
+        <form method="post" action="/approvals/{{ item.approval.id }}/reject"><input type="hidden" name="return_to" value="/approvals"><button class="btn secondary" type="submit">Reject</button></form>
       </div>
       {% if k in ['content', 'required_page', 'content_fix', 'meta_rewrite', 'page_rewrite', 'schema_inject'] %}
-      <details style="margin-top:10px;">
-        <summary style="cursor:pointer; color:var(--accent);">Request amendment</summary>
-        <form method="post" action="/approvals/{{ item.approval.id }}/amend" style="margin-top:8px;">
-          <input type="hidden" name="return_to" value="/approvals">
-          <textarea name="instructions" rows="3" required
-            placeholder="Tell the AI what to change — e.g. 'warmer tone and mention our 10-year warranty', 'shorter title', 'drop the FAQ section'…"
-            style="width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--border); border-radius:8px; background:#fff; color:var(--text); font:inherit;"></textarea>
-          <button class="btn" type="submit" style="margin-top:8px;">Send to AI &amp; regenerate</button>
-        </form>
-      </details>
-      {% endif %}
+      <details style="margin-top:10px;"><summary style="cursor:pointer; color:var(--accent);">Request amendment</summary>
+        <form method="post" action="/approvals/{{ item.approval.id }}/amend" style="margin-top:8px;"><input type="hidden" name="return_to" value="/approvals">
+          <textarea name="instructions" rows="3" required placeholder="Tell the AI what to change — e.g. 'warmer tone', 'shorter title', 'drop the FAQ'…" style="width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--border); border-radius:8px; background:#fff; color:var(--text); font:inherit;"></textarea>
+          <button class="btn" type="submit" style="margin-top:8px;">Send to AI &amp; regenerate</button></form>
+      </details>{% endif %}
     </div>
     {% endfor %}
   {% else %}
-    <div class="empty">Nothing waiting for approval. 🎉</div>
+    <div class="empty" style="margin-bottom:20px;">Nothing waiting for a yes/no. 🎉</div>
+  {% endif %}
+
+  <!-- LANE 2: Needs you -->
+  <div class="lane-head" style="margin-top:28px;"><span class="lane-ico" style="background:#fef3e2; color:#b45309;">🙋</span><h2 style="margin:0;">Needs your input</h2><span class="pill-count">{{ human_tasks|length }}</span><span class="muted" style="font-size:13px;">Real facts only you can provide — the AI won't invent them</span></div>
+  {% if human_tasks %}
+    {% for t in human_tasks %}
+    <div class="card appr-card" style="border-left:3px solid var(--warning);">
+      <div class="row-between">
+        <strong>{{ t.site.name }}</strong>
+        <span>{{ t.finding.severity | badge }}</span>
+      </div>
+      <p style="margin:8px 0 6px;">{{ t.finding.issue }}</p>
+      {{ urlrow(t.finding.evidence_url) }}
+      <div style="display:flex; gap:8px; margin-top:14px;">
+        <form method="post" action="/findings/{{ t.finding.id }}/done"><button class="btn" type="submit">Done — I fixed it</button></form>
+        <form method="post" action="/findings/{{ t.finding.id }}/snooze"><button class="btn secondary" type="submit">I'll do it later</button></form>
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="empty">Nothing needs your input right now.</div>
   {% endif %}
 </div>
+
+<style>
+  .lane-head { display:flex; align-items:center; gap:10px; margin:22px 0 12px; flex-wrap:wrap; }
+  .lane-ico { width:30px; height:30px; border-radius:9px; display:flex; align-items:center; justify-content:center; font-size:15px; }
+  .appr-url { display:inline-block; font-size:12px; color:var(--accent); word-break:break-all; }
+  .appr-card { margin-bottom:12px; }
+</style>
 {% endblock %}

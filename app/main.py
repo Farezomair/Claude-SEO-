@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "grow-page-81"
+BUILD = "approvals-lanes-82"
 
 
 @app.get("/version")
@@ -2073,8 +2073,25 @@ def _approval_items(db, site_id=None) -> list:
                 text_diff = copy_diff(change.old_css, change.css)
         elif appr.kind == "schema_inject":
             code = payload.get("jsonld", "")
+        # Traceable URL + severity so every card links back to its page.
+        url = payload.get("link") or payload.get("url") or ""
+        sev = "medium"
+        fid = payload.get("finding_id")
+        if fid:
+            f = db.get(Finding, fid)
+            if f:
+                url = url or f.evidence_url or ""
+                sev = f.severity or sev
+        if not url and payload.get("content_id"):
+            c = db.get(Content, payload.get("content_id"))
+            url = (getattr(c, "url", "") or getattr(c, "link", "")) if c else ""
+        url = url or (site.url if site else "")
         items.append({"approval": appr, "site": site, "body": body, "code": code,
-                      "preview_html": preview_html, "text_diff": text_diff})
+                      "preview_html": preview_html, "text_diff": text_diff,
+                      "url": url, "severity": sev})
+    # Highest-impact first so the queue reads top-down.
+    order = {"blocker": 0, "critical": 1, "high": 2, "medium": 3, "low": 4}
+    items.sort(key=lambda it: order.get(it["severity"], 3))
     return items
 
 
