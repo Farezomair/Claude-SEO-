@@ -65,6 +65,11 @@
           <div style="font-weight:700;">{{ site.name }}</div>
           <div class="muted" style="font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ site.url }}</div>
         </div>
+        {% if brain_status.get(site.id) %}
+          <span class="health-pill" style="background:#e5f6ef; color:#087443;" title="The Business Brain is set up — the app knows this site's strategy.">🧠 set up</span>
+        {% else %}
+          <span class="health-pill" style="background:#fef3e2; color:#b45309;" title="Fill in the Business Brain (site Settings) so the app tailors everything to this site's strategy.">🧠 set up needed</span>
+        {% endif %}
         {% if h %}
           {% if h.score >= 90 %}<span class="health-pill" style="background:#e5f6ef; color:#087443;">{{ h.score }} · {{ h.grade }}</span>
           {% elif h.score >= 70 %}<span class="health-pill" style="background:#fdf3dc; color:#946300;">{{ h.score }} · {{ h.grade }}</span>

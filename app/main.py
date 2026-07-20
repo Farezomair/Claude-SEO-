@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "brain-generic-83"
+BUILD = "brain-nudge-84"
 
 
 @app.get("/version")
@@ -295,12 +295,14 @@ def list_sites(request: Request, gnotice: str = "", db: Session = Depends(get_db
         if a:
             site_health[s.id] = {"score": a.health_score, "grade": a.grade or "?"}
     running = db.query(JobRun).filter(JobRun.kind == "weekly", JobRun.status == "running").count()
+    from .strategy_brain import get_brain, is_configured
+    brain_status = {s.id: is_configured(get_brain(db, s.id)) for s in sites}
     return templates.TemplateResponse(
         "sites.html",
         {"request": request, "sites": sites, "user": current_user(request),
          "pending_count": pending_count, "gnotice": gnotice, "nav": "home",
          "open_findings": open_findings, "needs_you": needs_you,
-         "site_health": site_health, "running": running},
+         "site_health": site_health, "running": running, "brain_status": brain_status},
     )
 
 
