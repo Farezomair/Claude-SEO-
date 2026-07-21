@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "brain-nudge-84"
+BUILD = "onboard-wizard-85"
 
 
 @app.get("/version")
@@ -318,9 +318,44 @@ def add_site(
     name = name.strip()
     url = url.strip()
     if name and url:
-        db.add(Site(name=name, url=url))
+        s = Site(name=name, url=url)
+        db.add(s)
         db.commit()
+        db.refresh(s)
+        # Straight into the guided setup so every new site gets fully configured.
+        return RedirectResponse(f"/sites/{s.id}/setup", status_code=303)
     return RedirectResponse("/sites", status_code=303)
+
+
+@app.get("/sites/{site_id}/setup", response_class=HTMLResponse)
+def site_setup(site_id: int, request: Request, notice: str = "", db: Session = Depends(get_db)):
+    """Guided one-pass onboarding: connect WordPress → Business Brain → Google
+    (optional) → first audit. Bundles what used to be scattered across tabs."""
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return RedirectResponse("/sites", status_code=303)
+    conn_row = db.query(SiteConnection).filter(SiteConnection.site_id == site_id).first()
+    connected = bool(conn_row and conn_row.wp_url and conn_row.wp_app_password_enc)
+    from .strategy_brain import BRAIN_QUESTIONS, get_brain, answers_of, is_configured
+    brain = get_brain(db, site_id)
+    brain_ok = is_configured(brain)
+    try:
+        google = google_oauth.connection()
+    except Exception:
+        google = None
+    has_audit = (db.query(Audit).filter(Audit.site_id == site_id, Audit.status == "completed").count() > 0)
+    audit_running = (db.query(JobRun).filter(JobRun.site_id == site_id, JobRun.kind == "weekly",
+                                             JobRun.status == "running").first() is not None)
+    done = sum([connected, brain_ok, has_audit])
+    return templates.TemplateResponse("setup.html", {
+        "request": request, "user": current_user(request), "nav": "home", "site": site,
+        "pending_count": db.query(Approval).filter(Approval.status == "pending").count(),
+        "connection": conn_row, "connected": connected,
+        "brain_questions": BRAIN_QUESTIONS, "brain_answers": answers_of(brain), "brain_ok": brain_ok,
+        "google": google, "has_audit": has_audit, "audit_running": audit_running,
+        "steps_done": done, "steps_total": 3, "notice": notice})
 
 
 def _build_chart(points: list[dict]):
@@ -2437,6 +2472,8 @@ async def save_business_brain(site_id: int, request: Request, db: Session = Depe
             if v:
                 answers[q["key"]] = v
     save_brain(db, site_id, answers)
+    if form.get("next", "") == f"/sites/{site_id}/setup":
+        return RedirectResponse(f"/sites/{site_id}/setup?notice=brain_saved", status_code=303)
     return RedirectResponse(f"/sites/{site_id}?tab=settings&notice=brain_saved", status_code=303)
 
 
@@ -2479,6 +2516,7 @@ def save_connection(
     wp_url: str = Form(...),
     wp_username: str = Form(...),
     wp_app_password: str = Form(""),
+    next: str = Form(""),
     db: Session = Depends(get_db),
 ):
     if not current_user(request):
@@ -2496,6 +2534,8 @@ def save_connection(
     if wp_app_password.strip():
         conn.wp_app_password_enc = encrypt(wp_app_password.strip())
     db.commit()
+    if next == f"/sites/{site_id}/setup":
+        return RedirectResponse(next + "?notice=saved", status_code=303)
     return RedirectResponse(f"/sites/{site_id}?tab=settings&notice=saved", status_code=303)
 
 

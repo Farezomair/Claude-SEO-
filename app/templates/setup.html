@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Set up {{ site.name }} · Ascend{% endblock %}
+{% block body %}
+<div class="container">
+  <p class="muted" style="margin-bottom:10px;"><a href="/sites">&larr; All websites</a></p>
+
+  <div class="card">
+    <h1 style="margin:0 0 4px;">Set up {{ site.name }}</h1>
+    <p class="muted" style="margin:0 0 14px;">{{ site.url }} — a few quick steps and Ascend can audit, fix, and grow this site.</p>
+    <div class="setup-progress"><i style="width:{{ (steps_done / steps_total * 100) | round(0) }}%;"></i></div>
+    <p class="muted" style="margin:8px 0 0; font-size:13px;">{{ steps_done }} of {{ steps_total }} done{% if steps_done == steps_total %} — you're all set! 🎉{% endif %}</p>
+  </div>
+
+  {% if notice == 'saved' %}<div class="notice notice-success">✓ WordPress connection saved.</div>{% endif %}
+  {% if notice == 'brain_saved' %}<div class="notice notice-success">✓ Business Brain saved — Ascend understands this site now.</div>{% endif %}
+
+  <!-- STEP 1: WordPress -->
+  <div class="card setup-step {{ 'done' if connected else '' }}">
+    <div class="setup-head"><span class="setup-num">{{ '✓' if connected else '1' }}</span><h2 style="margin:0;">Connect WordPress</h2>{% if connected %}<span class="health-pill" style="background:#e5f6ef; color:#087443;">connected</span>{% endif %}</div>
+    <p class="muted" style="margin:0 0 12px; font-size:13px;">So the doers can read the site and apply fixes. Use an <strong>Application Password</strong> (WordPress → Users → Profile), not your login password.</p>
+    <form method="post" action="/sites/{{ site.id }}/connection">
+      <input type="hidden" name="next" value="/sites/{{ site.id }}/setup">
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px;">
+        <div class="field"><label>WordPress URL</label><input type="url" name="wp_url" value="{{ connection.wp_url if connection else site.url }}" placeholder="https://example.com" required></div>
+        <div class="field"><label>Admin username</label><input type="text" name="wp_username" value="{{ connection.wp_username if connection else '' }}" required></div>
+      </div>
+      <div class="field"><label>Application password {% if connection and connection.wp_app_password_enc %}<span class="muted">(saved — leave blank to keep)</span>{% endif %}</label>
+        <input type="password" name="wp_app_password" autocomplete="off" placeholder="xxxx xxxx xxxx xxxx xxxx xxxx"></div>
+      <button class="btn" type="submit">{{ 'Update connection' if connected else 'Save & connect' }}</button>
+    </form>
+  </div>
+
+  <!-- STEP 2: Business Brain -->
+  <div class="card setup-step {{ 'done' if brain_ok else '' }}">
+    <div class="setup-head"><span class="setup-num">{{ '✓' if brain_ok else '2' }}</span><h2 style="margin:0;">Tell Ascend about the business</h2>{% if brain_ok %}<span class="health-pill" style="background:#e5f6ef; color:#087443;">set up</span>{% endif %}</div>
+    <p class="muted" style="margin:0 0 12px; font-size:13px;">This is the Business Brain — fill it once and every part of Ascend (audits, writer, growth plan) works <strong>with</strong> your strategy instead of flagging things you've decided on purpose.</p>
+    <form method="post" action="/sites/{{ site.id }}/business-brain">
+      <input type="hidden" name="next" value="/sites/{{ site.id }}/setup">
+      {% for q in brain_questions %}
+      <div class="field">
+        <label>{{ q.q }}{% if q.help %} <span class="muted" style="font-weight:400;">— {{ q.help }}</span>{% endif %}</label>
+        {% if q.type == 'select' %}
+        <select name="{{ q.key }}" style="width:100%; padding:11px 14px; border-radius:11px; border:1px solid #d9deeb; background:#fff; color:var(--text); font:inherit; font-size:14px;">
+          <option value="">— choose —</option>
+          {% for opt in q.options %}<option value="{{ opt }}" {{ 'selected' if brain_answers.get(q.key) == opt else '' }}>{{ opt }}</option>{% endfor %}
+        </select>
+        {% elif q.type == 'multi' %}
+        <div style="display:flex; flex-direction:column; gap:6px; margin-top:2px;">
+          {% for opt in q.options %}<label style="font-weight:400; display:flex; align-items:center; gap:8px; margin:0;"><input type="checkbox" name="{{ q.key }}" value="{{ opt }}" {{ 'checked' if opt in (brain_answers.get(q.key) or []) else '' }}> {{ opt }}</label>{% endfor %}
+        </div>
+        {% elif q.type == 'textarea' %}
+        <textarea name="{{ q.key }}" rows="2" placeholder="{{ q.placeholder or '' }}">{{ brain_answers.get(q.key) or '' }}</textarea>
+        {% else %}
+        <input type="text" name="{{ q.key }}" value="{{ brain_answers.get(q.key) or '' }}" placeholder="{{ q.placeholder or '' }}">
+        {% endif %}
+      </div>
+      {% endfor %}
+      <button class="btn" type="submit">Save Business Brain</button>
+    </form>
+  </div>
+
+  <!-- STEP 3: Google (optional, app-wide) -->
+  <div class="card setup-step {{ 'done' if google else '' }}">
+    <div class="setup-head"><span class="setup-num">{{ '✓' if google else '★' }}</span><h2 style="margin:0;">Connect Google <span class="muted" style="font-size:13px; font-weight:400;">(optional)</span></h2></div>
+    <p class="muted" style="margin:0 0 12px; font-size:13px;">Connect Search Console so Ascend can track your real Google positions and show what's actually moving. Shared across your sites — connect once. You can skip this and add it later.</p>
+    {% if google %}
+      <span class="health-pill" style="background:#e5f6ef; color:#087443;">connected as {{ google.get('email', 'Google') }}</span>
+    {% else %}
+      <a class="btn secondary" href="/google/connect">Connect Google</a>
+      <span class="muted" style="font-size:12px; margin-left:8px;">(needs the one-time OAuth client set on the server)</span>
+    {% endif %}
+  </div>
+
+  <!-- STEP 4: First audit -->
+  <div class="card setup-step {{ 'done' if has_audit else '' }}">
+    <div class="setup-head"><span class="setup-num">{{ '✓' if has_audit else '3' }}</span><h2 style="margin:0;">Run the first audit</h2></div>
+    <p class="muted" style="margin:0 0 12px; font-size:13px;">Scan the site, fix what's safe, and score it — SEO and Business Fitness together.</p>
+    {% if has_audit %}
+      <a class="btn" href="/sites/{{ site.id }}">Go to the dashboard →</a>
+    {% elif not connected %}
+      <div class="notice notice-muted">Connect WordPress first (step 1), then run the audit.</div>
+    {% else %}
+      <form method="post" action="/sites/{{ site.id }}/run-weekly">
+        <button class="btn big" type="submit" {{ 'disabled' if audit_running else '' }}>{{ 'Audit running…' if audit_running else '▶ Run audit & fix' }}</button>
+      </form>
+      {% if audit_running %}<p class="muted" style="font-size:13px; margin:10px 0 0;">Running — this takes a few minutes. <a href="/sites/{{ site.id }}">Open the dashboard</a> to watch it live.</p>{% endif %}
+    {% endif %}
+  </div>
+
+  {% if steps_done == steps_total %}
+  <div class="card" style="text-align:center; background:var(--panel-2);">
+    <p style="margin:0 0 10px; font-size:15px;">🎉 <strong>{{ site.name }} is fully set up.</strong></p>
+    <a class="btn" href="/sites/{{ site.id }}">Go to the dashboard</a>
+  </div>
+  {% endif %}
+</div>
+
+<style>
+  .setup-progress { height:10px; border-radius:999px; background:var(--panel-2); overflow:hidden; }
+  .setup-progress > i { display:block; height:100%; border-radius:999px; background:var(--accent-grad); transition:width .4s ease; }
+  .setup-step .setup-head { display:flex; align-items:center; gap:12px; margin-bottom:6px; }
+  .setup-num { flex:none; width:30px; height:30px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:14px; background:var(--panel-3); color:var(--muted); }
+  .setup-step.done .setup-num { background:linear-gradient(135deg,#10b981,#059669); color:#fff; }
+</style>
+{% endblock %}
