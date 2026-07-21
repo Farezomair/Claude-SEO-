@@ -72,7 +72,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "jarvis-88"
+BUILD = "url-normalize-89"
 
 
 @app.get("/version")
@@ -316,7 +316,10 @@ def add_site(
     if not current_user(request):
         return RedirectResponse("/login", status_code=303)
     name = name.strip()
-    url = url.strip()
+    # Accept bare domains ("www.bruterank.com", "acme.com") — normalize to https.
+    url = url.strip().rstrip("/")
+    if url and not url.lower().startswith(("http://", "https://")):
+        url = "https://" + url.lstrip("/")
     if name and url:
         s = Site(name=name, url=url)
         db.add(s)
