@@ -146,6 +146,10 @@
     <form method="post" action="/outreach/upload-prospects" enctype="multipart/form-data" class="ob-btns" style="align-items:center; margin:8px 0;">
       <b style="min-width:180px;">Prospects (.xlsx)</b><input type="file" name="file" accept=".xlsx" required><button class="btn">Add new prospects</button>
     </form>
+    <form method="post" action="/outreach/upload-settings" enctype="multipart/form-data" class="ob-btns" style="align-items:center; margin:8px 0;">
+      <b style="min-width:180px;">Settings patch (.json)</b><input type="file" name="file" accept=".json" required><button class="btn">Merge into settings</button>
+    </form>
+    <p class="muted" style="font-size:12px; margin:4px 0;">Skip dates (no cold emails): {{ (limits.skip_dates or [])|join(', ') or 'none' }}</p>
     <form method="post" action="/outreach/control/test-mail" style="margin:8px 0;"><button class="btn">Send a test email to my digest address</button></form>
   </details>
 </div>

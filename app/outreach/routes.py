@@ -172,6 +172,19 @@ def export_settings(request: Request):
     return JSONResponse(config.load())
 
 
+@router.post("/outreach/upload-settings")
+async def upload_settings(request: Request, file: UploadFile = File(...)):
+    """Merge a partial settings file into the stored settings (e.g. {"limits": {"skip_dates": [...]}})."""
+    if (r := _guard(request)):
+        return r
+    patch = json.loads((await file.read()).decode("utf8"))
+    with db.connect() as con:
+        raw = db.get_meta(con, "settings")
+    current = json.loads(raw) if raw else {}
+    config.save(config._merge(current, patch))
+    return _back("Settings updated: " + ", ".join(patch.keys()))
+
+
 @router.post("/outreach/approve/{pid}")
 def approve(request: Request, pid: int, subject: str = Form(None), body: str = Form(None)):
     if (r := _guard(request)):

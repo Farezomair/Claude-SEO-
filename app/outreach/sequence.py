@@ -167,6 +167,9 @@ def run_send(dry_run=False, wait=True, process_inbox=None):
         return
 
     dayname = DAY_NAMES[now_et().weekday()]
+    if now_et().date().isoformat() in (lim.get("skip_dates") or []):
+        print("Holiday / skip date: no cold emails today; due follow-ups go out on the next send day.")
+        return
     if process_inbox and not dry_run:
         process_inbox()
 
