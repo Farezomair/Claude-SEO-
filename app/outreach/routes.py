@@ -137,6 +137,11 @@ async def upload_research(request: Request, file: UploadFile = File(...)):
         if not p:
             done.append(f"#{pid} not found")
             continue
+        if item.get("skip"):
+            with db.connect() as con:
+                db.set_status(con, pid, "skipped", note="not a fit: " + str(item["skip"])[:300])
+            done.append(f"#{pid} skipped")
+            continue
         if item.get("checks"):
             serp.add(pid, item["checks"])
         if "first_name" in item:
