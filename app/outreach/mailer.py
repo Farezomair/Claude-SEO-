@@ -1,13 +1,21 @@
-"""SMTP send + IMAP access for the outreach mailbox (Hostinger)."""
+"""Send + IMAP access for the outreach mailbox (Hostinger).
+
+Sending goes direct over SMTP, or, where the host blocks outbound SMTP (Railway), through the site's
+WordPress mail relay over HTTPS (OUTREACH_RELAY_USER + OUTREACH_RELAY_APP_PASSWORD, a WP Application Password).
+"""
+import base64
 import imaplib
 import mimetypes
+import os
 import re
 import smtplib
 import ssl
 import time
 from email.message import EmailMessage
-from email.utils import formataddr, formatdate, make_msgid
+from email.utils import formataddr, formatdate, make_msgid, parseaddr
 from pathlib import Path
+
+import httpx
 
 from . import config
 
@@ -34,12 +42,47 @@ def build(to_addr, subject, body, in_reply_to=None, refs=None, attachment=None):
     return msg
 
 
+def _relay():
+    """Relay settings, when sending goes through the site's WordPress (hosts that block outbound SMTP)."""
+    user = os.getenv("OUTREACH_RELAY_USER", "").strip()
+    pw = os.getenv("OUTREACH_RELAY_APP_PASSWORD", "").strip()
+    url = os.getenv("OUTREACH_RELAY_URL", "").strip()
+    if not (user and pw):
+        return None
+    if not url:
+        site = (config.load()["company"].get("website") or "").strip().removeprefix("https://").strip("/")
+        url = f"https://{site}/wp-json/br-relay/v1/send"
+    return url, user, pw
+
+
+def _send_via_relay(msg: EmailMessage, relay):
+    url, user, pw = relay
+    name, addr = parseaddr(msg["From"])
+    payload = {
+        "to": msg["To"], "subject": msg["Subject"], "from_email": addr, "from_name": name,
+        "text": msg.get_body(preferencelist=("plain",)).get_content(),
+        "message_id": msg["Message-ID"], "in_reply_to": msg.get("In-Reply-To") or "",
+        "references": msg.get("References") or "", "list_unsubscribe": msg.get("List-Unsubscribe") or "",
+    }
+    for part in msg.iter_attachments():
+        payload["attachment"] = {"filename": part.get_filename(), "content_type": part.get_content_type(),
+                                 "content_b64": base64.b64encode(part.get_payload(decode=True)).decode()}
+        break
+    r = httpx.post(url, json=payload, auth=(user, pw), timeout=90)
+    if r.status_code >= 300:
+        raise RuntimeError(f"mail relay refused the send ({r.status_code}): {r.text[:300]}")
+
+
 def send(msg: EmailMessage):
     cfg = config.load()["sender"]
-    ctx = ssl.create_default_context()
-    with smtplib.SMTP_SSL(cfg["smtp_host"], cfg["smtp_port"], context=ctx, timeout=60) as smtp:
-        smtp.login(cfg.get("login", cfg["email"]), config.mail_password())
-        smtp.send_message(msg)
+    relay = _relay()
+    if relay:
+        _send_via_relay(msg, relay)
+    else:
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP_SSL(cfg["smtp_host"], cfg["smtp_port"], context=ctx, timeout=60) as smtp:
+            smtp.login(cfg.get("login", cfg["email"]), config.mail_password())
+            smtp.send_message(msg)
     try:
         save_to_sent(msg)
     except Exception as e:  # sending succeeded; a missing Sent copy is not fatal
