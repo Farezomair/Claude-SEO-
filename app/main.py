@@ -72,18 +72,20 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Outreach: cold email agent (its own tables, page and background loop; off unless OUTREACH_ENABLED=true).
-from .outreach import routes as outreach_routes  # noqa: E402
-from .outreach import scheduler as outreach_scheduler  # noqa: E402
-
-outreach_routes.templates = templates
-app.include_router(outreach_routes.router)
+# Fully guarded: if anything in it fails to load, Ascend still starts without the Outreach page.
 try:
+    from .outreach import routes as outreach_routes
+    from .outreach import scheduler as outreach_scheduler
+
+    outreach_routes.templates = templates
+    app.include_router(outreach_routes.router)
     outreach_scheduler.start()
 except Exception as _e:  # never let the outreach module take Ascend down
-    print(f"[outreach] scheduler did not start: {_e}", flush=True)
+    import traceback as _tb
+    print("[outreach] module not loaded: " + "".join(_tb.format_exception(_e))[-1500:], flush=True)
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "outreach-1"
+BUILD = "outreach-2"
 
 
 @app.get("/version")
