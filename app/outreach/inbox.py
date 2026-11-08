@@ -118,9 +118,11 @@ def check_bounce_rate(con):
     start = sequence.now_et().replace(hour=0, minute=0, second=0).astimezone(sequence.ZoneInfo("UTC")).isoformat()
     bounces = con.execute("SELECT COUNT(*) c FROM events WHERE event='bounce' AND at>=?", (start,)).fetchone()["c"]
     if bounces and sent >= lim["bounce_min_sample"] and bounces / sent > lim["bounce_pause_rate"] and not sequence.paused(con):
-        db.set_meta(con, "paused", f"{bounces} bounces out of {sent} sent today")
-        alert("Sending paused: bounce rate", f"{bounces} of {sent} emails bounced today. Sending is paused.\n"
-              "Check the list, then press Resume on the Outreach page in Ascend.")
+        tomorrow = (sequence.now_et().date() + timedelta(days=1)).isoformat()
+        db.set_meta(con, "auto_paused_until", tomorrow)
+        db.set_meta(con, "auto_paused_reason", f"{bounces} bounces out of {sent} sent today")
+        alert("Sending paused for today: bounce rate", f"{bounces} of {sent} emails bounced today. Sending stops for the "
+              f"rest of today to protect the domain and resumes on its own on {tomorrow}. No action needed unless it repeats.")
 
 
 def process_inbox(verbose=True):

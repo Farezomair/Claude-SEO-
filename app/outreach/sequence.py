@@ -45,7 +45,22 @@ def total_left(con) -> int:
 
 
 def paused(con):
-    return db.get_meta(con, "paused") or None
+    """Manual pause (Pause button) stays until Resume. An automatic bounce pause only lasts until the next day."""
+    manual = db.get_meta(con, "paused")
+    if manual:
+        return manual
+    until = db.get_meta(con, "auto_paused_until")
+    if until and now_et().date().isoformat() < until:
+        return db.get_meta(con, "auto_paused_reason") or "automatic pause"
+    return None
+
+
+def queue_status(con) -> dict:
+    """How many send days the ready first emails cover."""
+    lim = config.load()["limits"]
+    ready = len(ready_first_emails(con, 1000))
+    per_day = lim["ramp"][0]["new_per_day"] if lim.get("ramp") else 2
+    return {"ready": ready, "send_days_covered": ready // max(1, per_day), "per_day": per_day}
 
 
 def thread_of(con, prospect_id):

@@ -26,6 +26,14 @@ STATUS_LABELS = {
 }
 
 
+def _health_safe():
+    try:
+        from . import health
+        return health.check()
+    except Exception as e:
+        return {"healthy": False, "relay_ok": False, "relay_detail": str(e), "ready": 0, "send_days_covered": 0}
+
+
 def _guard(request):
     return None if current_user(request) else RedirectResponse("/login", status_code=303)
 
@@ -74,7 +82,7 @@ def outreach_page(request: Request, msg: str = ""):
         "first_send": first_send, "funnel": funnel, "total": sum(counts.values()), "review": review,
         "ready": ready, "needs_you": needs_you, "replies": replies, "sent": sent, "events": events,
         "sender": cfg["sender"], "company": cfg["company"], "limits": cfg["limits"],
-        "labels": STATUS_LABELS, "research_next": research_queue(8),
+        "labels": STATUS_LABELS, "research_next": research_queue(8), "health": _health_safe(),
     })
 
 
@@ -108,6 +116,15 @@ def research_queue(limit=10):
     st = {v: i for i, v in enumerate(tgt["state_order"])}
     rows.sort(key=lambda r: (pr.get(r["priority"], 9), st.get((r["state"] or "")[:2], 9), r["id"]))
     return rows[:limit]
+
+
+@router.get("/outreach/status")
+def status_json(request: Request):
+    """Health + queue for the weekly research task: is anything going to stop email?"""
+    if (r := _guard(request)):
+        return r
+    from . import health
+    return JSONResponse(health.check())
 
 
 @router.get("/outreach/research-queue")
@@ -243,6 +260,7 @@ def control(request: Request, action: str):
             db.set_meta(con, "paused", "paused in Ascend")
         elif action == "resume":
             db.del_meta(con, "paused")
+            db.del_meta(con, "auto_paused_until")
         elif action == "approve-templates":
             db.set_meta(con, "templates_approved", db.now_iso())
     if action == "inbox":

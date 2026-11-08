@@ -46,6 +46,12 @@
   </div>
   {% endif %}
 
+  <div class="card {{ '' if health.healthy else 'ob-warn' }}">
+    <p style="margin:0;"><b>{{ 'Healthy' if health.healthy else 'Needs attention' }}:</b>
+      mail relay {{ 'OK' if health.relay_ok else 'FAILING (' ~ health.relay_detail ~ ')' }} ·
+      {{ health.ready }} first emails queued, about {{ health.send_days_covered }} send days{% if health.send_days_covered < 3 %} (low: run the research task){% endif %}</p>
+  </div>
+
   <div class="card">
     <h2 style="margin:0 0 10px;">Funnel <span class="muted" style="font-size:13px;">{{ total }} prospects · first send: {{ first_send or "not yet" }} · up to {{ limits.ramp[0].new_per_day }} new a day, {{ limits.window_start }} to {{ limits.window_end }} ET</span></h2>
     <div class="ob-grid">

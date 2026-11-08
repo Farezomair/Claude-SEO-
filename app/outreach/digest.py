@@ -38,6 +38,16 @@ def build_digest():
     lines = [f"Outreach, {sequence.now_et():%A %b %d, %Y}", ""]
     if paused:
         lines += [f"SENDING IS PAUSED: {paused}", ""]
+    with db.connect() as con:
+        q = sequence.queue_status(con)
+    from . import health
+    h = health.check()
+    lines += [f"Queue: {q['ready']} first emails ready, about {q['send_days_covered']} send days."]
+    if q["send_days_covered"] < 3:
+        lines += ["WARNING: the queue is low. Run the weekly research task (Scheduled in the Claude app) so sending doesn't stop."]
+    if not h["relay_ok"]:
+        lines += [f"WARNING: mail relay check failed: {h['relay_detail']}"]
+    lines += [""]
     kinds = Counter(m["kind"] for m in today)
     lines += [f"Sent today: {len(today)} (first emails {kinds.get('email1', 0)}, follow-ups "
               f"{kinds.get('fu1', 0) + kinds.get('fu2', 0)}, replies {sum(v for k, v in kinds.items() if k not in ('email1', 'fu1', 'fu2'))})",
