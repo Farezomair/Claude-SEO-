@@ -71,8 +71,19 @@ app.add_middleware(
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
+# Outreach: cold email agent (its own tables, page and background loop; off unless OUTREACH_ENABLED=true).
+from .outreach import routes as outreach_routes  # noqa: E402
+from .outreach import scheduler as outreach_scheduler  # noqa: E402
+
+outreach_routes.templates = templates
+app.include_router(outreach_routes.router)
+try:
+    outreach_scheduler.start()
+except Exception as _e:  # never let the outreach module take Ascend down
+    print(f"[outreach] scheduler did not start: {_e}", flush=True)
+
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "living-intelligence-90"
+BUILD = "outreach-1"
 
 
 @app.get("/version")
