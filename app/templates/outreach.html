@@ -99,7 +99,19 @@
       <div class="ob-mail">{{ d.body }}</div>
       <form method="post" action="/outreach/reject/{{ d.id }}"><button class="btn">Don't send this one</button></form>
     </details>
-    {% else %}<p class="muted" style="margin:0;">Nothing queued. The agent prepares new drafts at 6 a.m. ET on first-email days.</p>{% endfor %}
+    {% else %}<p class="muted" style="margin:0;">Nothing queued. Upload research for the next centers; the agent writes and scores their emails at 6 a.m. ET on first-email days.</p>{% endfor %}
+  </div>
+
+  <div class="card">
+    <h2 style="margin:0 0 6px;">Next to research</h2>
+    <p class="muted" style="margin:0 0 8px; font-size:13px;">Live Google checks are done by hand in a Claude session (Chrome, location set, not logged in), then uploaded below. The agent only writes and sends for researched centers.</p>
+    <table class="ob">
+      {% for p in research_next %}<tr><td>#{{ p.id }}</td><td><b>{{ p.center }}</b><br><span class="muted">{{ p.website }}</span></td><td>{{ p.cities }}, {{ p.state }}</td><td>priority {{ p.priority }}</td></tr>
+      {% else %}<tr><td class="muted">Everyone qualified has been researched.</td></tr>{% endfor %}
+    </table>
+    <form method="post" action="/outreach/upload-research" enctype="multipart/form-data" class="ob-btns" style="align-items:center; margin-top:10px;">
+      <b style="min-width:180px;">Research file (.json)</b><input type="file" name="file" accept=".json" required><button class="btn">Upload research</button>
+    </form>
   </div>
 
   <div class="card">

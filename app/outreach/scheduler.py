@@ -2,7 +2,7 @@
 
 Every few minutes it checks the clock (US Eastern) and does whatever is due:
   inbox     every 15 minutes: read replies, act on them, alert the owner
-  prepare   once a day from 06:00 ET on first-email days: research + write + score tomorrow's batch
+  prepare   once a day from 06:00 ET on first-email days: write + score emails for researched prospects
   send      during the send window: first emails, follow-ups, threaded, spaced, within limits
   digest    once a day after 12:30 ET: email the owner a summary
 Everything is read from the database each tick, so a restart or redeploy simply continues.
@@ -13,7 +13,7 @@ import time
 import traceback
 from datetime import datetime, timedelta
 
-from . import config, db, digest, inbox, sequence, writer
+from . import config, db, digest, inbox, sequence, serp, writer
 
 TICK_SECONDS = 120
 _started = False
@@ -45,12 +45,13 @@ def prepare_batch(max_prospects=None) -> list:
         ready = len(sequence.ready_first_emails(con, 100))
         need = max(0, quota - ready)
         rows = con.execute("SELECT * FROM prospects WHERE status='new'").fetchall()
-    rows = [r for r in rows if r["website_check"] in tgt["website_check"]
-            and (not tgt["require_mx_ok"] or r["mx_ok"] == "Yes")]
+    have = serp.researched_ids()
+    rows = [r for r in rows if r["id"] in have]  # only prospects with uploaded live Google checks
     pr = {v: i for i, v in enumerate(tgt["priority_order"])}
     st = {v: i for i, v in enumerate(tgt["state_order"])}
     rows.sort(key=lambda r: (pr.get(r["priority"], 9), st.get((r["state"] or "")[:2], 9), r["id"]))
     budget = max_prospects if max_prospects is not None else need * 3
+    # research is uploaded by hand; nothing else to pick from
     for r in rows[:budget]:
         if need <= 0:
             break

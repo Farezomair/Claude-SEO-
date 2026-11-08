@@ -6,7 +6,6 @@ so they never live in this public code. Secrets come from environment variables:
 
   OUTREACH_ENABLED=true        turn the scheduler on
   OUTREACH_MAIL_PASSWORD       mailbox password (SMTP + IMAP)
-  SERPER_API_KEY               serper.dev key for live Google checks
   ANTHROPIC_API_KEY            already used by Ascend
 """
 import copy
@@ -80,8 +79,6 @@ def is_configured(cfg=None) -> list[str]:
         missing.append("OUTREACH_MAIL_PASSWORD variable in Railway")
     if not os.getenv("ANTHROPIC_API_KEY"):
         missing.append("ANTHROPIC_API_KEY variable in Railway")
-    if not os.getenv("SERPER_API_KEY"):
-        missing.append("SERPER_API_KEY variable in Railway")
     return missing
 
 

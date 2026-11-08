@@ -4,12 +4,14 @@ import os
 import tempfile
 import threading
 from collections import Counter
+from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from ..auth import current_user
-from . import config, db, digest, importer, inbox, mailer, scheduler, sequence
+from . import config, db, digest, importer, inbox, mailer, rules, scheduler, sequence, serp
+from . import templates as tmpl
 
 router = APIRouter()
 templates = None  # set by main.py so the page shares Ascend's Jinja environment and filters
@@ -29,7 +31,7 @@ def _guard(request):
 
 
 def _back(msg=""):
-    return RedirectResponse("/outreach" + (f"?msg={msg}" if msg else ""), status_code=303)
+    return RedirectResponse("/outreach" + (f"?msg={quote(msg)}" if msg else ""), status_code=303)
 
 
 @router.get("/outreach", response_class=HTMLResponse)
@@ -72,7 +74,7 @@ def outreach_page(request: Request, msg: str = ""):
         "first_send": first_send, "funnel": funnel, "total": sum(counts.values()), "review": review,
         "ready": ready, "needs_you": needs_you, "replies": replies, "sent": sent, "events": events,
         "sender": cfg["sender"], "company": cfg["company"], "limits": cfg["limits"],
-        "labels": STATUS_LABELS,
+        "labels": STATUS_LABELS, "research_next": research_queue(8),
     })
 
 
@@ -90,6 +92,77 @@ async def upload_state(request: Request, file: UploadFile = File(...)):
         return r
     counts = importer.import_state(await file.read())
     return _back("State imported: " + ", ".join(f"{v} {k}" for k, v in counts.items()))
+
+
+def research_queue(limit=10):
+    """Next prospects to research by hand: qualified, not yet researched, in priority order."""
+    cfg = config.load()
+    tgt = cfg["targeting"]
+    have = serp.researched_ids()
+    with db.connect() as con:
+        rows = con.execute("SELECT id, center, website, state, cities, levels_of_care, priority, website_check, mx_ok, email "
+                           "FROM prospects WHERE status='new'").fetchall()
+    rows = [r for r in rows if r["id"] not in have and r["website_check"] in tgt["website_check"]
+            and (not tgt["require_mx_ok"] or r["mx_ok"] == "Yes")]
+    pr = {v: i for i, v in enumerate(tgt["priority_order"])}
+    st = {v: i for i, v in enumerate(tgt["state_order"])}
+    rows.sort(key=lambda r: (pr.get(r["priority"], 9), st.get((r["state"] or "")[:2], 9), r["id"]))
+    return rows[:limit]
+
+
+@router.get("/outreach/research-queue")
+def research_queue_json(request: Request):
+    if (r := _guard(request)):
+        return r
+    return JSONResponse(research_queue(20))
+
+
+@router.post("/outreach/upload-research")
+async def upload_research(request: Request, file: UploadFile = File(...)):
+    """Research file from a Claude session: live Google checks per prospect, optionally a finished email.
+
+    {"prospects": [{"id": 6, "checks": [{query, location, maps_top, prospect_in_maps, organic_top,
+      prospect_organic, notes}], "first_name": "Eric", "first_name_source": "...",
+      "email": {"subject": "...", "core": "<paragraphs between greeting and signature>", "fu1_line": "..."}}]}
+    """
+    if (r := _guard(request)):
+        return r
+    data = json.loads((await file.read()).decode("utf8"))
+    cfg = config.load()
+    done = []
+    for item in data.get("prospects", []):
+        pid = int(item["id"])
+        with db.connect() as con:
+            p = con.execute("SELECT * FROM prospects WHERE id=?", (pid,)).fetchone()
+        if not p:
+            done.append(f"#{pid} not found")
+            continue
+        if item.get("checks"):
+            serp.add(pid, item["checks"])
+        if "first_name" in item:
+            with db.connect() as con:
+                con.execute("UPDATE prospects SET first_name=?, first_name_source=? WHERE id=?",
+                            (item.get("first_name") or None, item.get("first_name_source"), pid))
+        em = item.get("email")
+        if not em:
+            done.append(f"#{pid} research saved")
+            continue
+        slots = tmpl.base_slots(cfg)
+        slots.update(name=item.get("first_name") or p["first_name"] or "there")
+        body = f"Hi {slots['name']},\n\n{em['core'].strip()}\n\n" + tmpl.FOOTER.format(**slots)
+        problems = rules.check("email1", em["subject"], body, slots)
+        status = "approved" if not problems else "needs_review"
+        notes = {"problems": problems, "source": "written in a Claude session from live Google checks",
+                 "fields": {"fu1_line": em.get("fu1_line", "")}, "review": {"score": em.get("score")}}
+        with db.connect() as con:
+            con.execute("DELETE FROM messages WHERE prospect_id=? AND kind='email1' AND status IN ('draft','needs_review','approved')", (pid,))
+            con.execute("""INSERT INTO messages(prospect_id,kind,direction,status,to_addr,from_addr,subject,body,review_notes,created_at)
+                           VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                        (pid, "email1", "out", status, p["email"], cfg["sender"]["email"], em["subject"], body,
+                         json.dumps(notes), db.now_iso()))
+            db.set_status(con, pid, status, note="email uploaded from research session")
+        done.append(f"#{pid} email {status}" + (f" ({'; '.join(problems)})" if problems else ""))
+    return _back("Research uploaded: " + ", ".join(done))
 
 
 @router.get("/outreach/export-settings")

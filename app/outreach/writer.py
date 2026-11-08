@@ -172,10 +172,7 @@ def draft_email1(prospect_id: int, max_rounds: int = 4) -> dict:
 
     checks = serp.recent(prospect_id)
     if not checks:
-        home = (site.get("pages") or [{}])[0]
-        summary = " ".join([home.get("title", ""), home.get("meta_description", ""), home.get("text", "")[:2000]])
-        serp.check_prospect(p, summary, p["center"])
-        checks = serp.recent(prospect_id)
+        return {"status": "waiting_research", "reason": "no live Google checks uploaded yet"}
 
     listing = {k: p[k] for k in ("center", "website", "state", "cities", "levels_of_care", "phone")}
     system = SYSTEM.format(sender=cfg["sender"]["name"] or "the sender", company=cfg["company"]["name"] or "our agency",

@@ -85,7 +85,7 @@ except Exception as _e:  # never let the outreach module take Ascend down
     print("[outreach] module not loaded: " + "".join(_tb.format_exception(_e))[-1500:], flush=True)
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "outreach-2"
+BUILD = "outreach-3"
 
 
 @app.get("/version")
