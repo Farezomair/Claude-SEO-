@@ -218,8 +218,8 @@ def handle_reply(con, p, msg, from_addr, verbose):
         alert(f"Lead: {p['center']} wants the review",
               f"{p['center']} ({p['website']}) said yes.\n\nThey wrote: {c.summary}\n\n"
               f"The agent already replied that the review comes within 2 business days.\n"
-              f"Next: build the Admissions Leak Audit, then run:\n"
-              f"Ask Claude to build the audit, then upload the PDF on the Outreach page in Ascend (prospect #{p['id']}).")
+              f"Nothing to do: the scheduled audit task builds the one-page audit and sends it on its own, "
+              f"usually within one business day (prospect #{p['id']}). You'll get a notification when it goes out.")
         return
     # Questions, call requests, referrals, anything after the audit, anything unclear: the owner takes it.
     status = "handed_off" if after_audit or cat == "call_request" else "needs_owner"
