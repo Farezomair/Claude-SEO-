@@ -134,6 +134,33 @@ def research_queue_json(request: Request):
     return JSONResponse(research_queue(20))
 
 
+@router.get("/outreach/audit-queue")
+def audit_queue_json(request: Request):
+    """Prospects who said yes and are waiting for their audit, with everything needed to build it."""
+    if (r := _guard(request)):
+        return r
+    cfg = config.load()
+    with db.connect() as con:
+        rows = con.execute("""SELECT id, center, website, domain, email, phone, first_name, state, cities, levels_of_care,
+                              status, notes, updated_at FROM prospects WHERE status='audit_requested' ORDER BY updated_at""").fetchall()
+        out = []
+        for p in rows:
+            first = con.execute("""SELECT subject, body, sent_at FROM messages WHERE prospect_id=? AND kind='email1'
+                                   AND status='sent' ORDER BY id LIMIT 1""", (p["id"],)).fetchone()
+            reply = con.execute("""SELECT from_addr, subject, body, classification, created_at FROM messages
+                                   WHERE prospect_id=? AND direction='in' ORDER BY id DESC LIMIT 1""", (p["id"],)).fetchone()
+            item = dict(p)
+            item["requested_at"] = p["updated_at"]
+            item["first_email"] = dict(first) if first else None
+            item["reply"] = dict(reply) if reply else None
+            if item["reply"]:
+                item["reply"]["classification"] = json.loads(item["reply"].get("classification") or "{}")
+            item["checks"] = serp.recent(p["id"])
+            out.append(item)
+    return JSONResponse({"calendly": cfg["company"].get("calendly", ""), "company": cfg["company"].get("name", ""),
+                         "website": cfg["company"].get("website", ""), "prospects": out})
+
+
 @router.post("/outreach/upload-research")
 async def upload_research(request: Request, file: UploadFile = File(...)):
     """Research file from a Claude session: live Google checks per prospect, optionally a finished email.
@@ -247,8 +274,9 @@ async def send_audit(request: Request, pid: int, first_fix: str = Form(...), fil
     path = os.path.join(tempfile.mkdtemp(), name)
     with open(path, "wb") as f:
         f.write(await file.read())
-    digest.send_audit(pid, path, first_fix)
-    return _back(f"Audit sent to #{pid}.")
+    if digest.send_audit(pid, path, first_fix):
+        return _back(f"Audit sent to #{pid}.")
+    return _back(f"Audit NOT sent to #{pid}: the email was blocked by the rules or sending is paused. See the activity log.")
 
 
 @router.post("/outreach/control/{action}")

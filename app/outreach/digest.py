@@ -96,5 +96,8 @@ def send_audit(prospect_id: int, pdf: str, first_fix: str, dry_run=False):
         subject, body = templates.render("audit", **sequence.slots_for(con, p, first_fix=first_fix))
         print(body)
         if sequence.send_message(con, p, "audit", subject, body, attachment=path, dry_run=dry_run):
-            db.set_status(con, prospect_id, "audit_sent", note=f"audit: {path.name}")
+            if not dry_run:
+                db.set_status(con, prospect_id, "audit_sent", note=f"audit: {path.name}")
             print(f"Audit sent to {p['email']}.")
+            return True
+        return False
