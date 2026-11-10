@@ -36,9 +36,13 @@ def social_page(request: Request, msg: str = ""):
     cfg = store.load()
     upcoming = [_view(r, cfg) for r in store.posts("platform='facebook' AND status='planned'")]
     recent = [_view(r, cfg) for r in store.posts("platform='facebook' AND status<>'planned'", order="slot_at DESC", limit=30)]
+    try:
+        preview = json.loads(store.get_meta("social_preview") or "{}")
+    except ValueError:
+        preview = {}
     return templates.TemplateResponse("social.html", {
         "request": request, "user": current_user(request), "nav": "social", "msg": msg, "cfg": cfg,
-        "connected": bool(facebook.token()), "loop_on": scheduler.ENABLED, "upcoming": upcoming, "recent": recent,
+        "preview": preview, "connected": bool(facebook.token()), "loop_on": scheduler.ENABLED, "upcoming": upcoming, "recent": recent,
         "cfg_json": json.dumps({k: v for k, v in cfg.items() if k != "style_examples"}, indent=1),
     })
 
@@ -137,3 +141,26 @@ async def social_settings(request: Request, file: UploadFile = File(...)):
     store.save_patch(patch)
     n = planner.import_history(history) if history else 0
     return _back(f"Settings saved{f', {n} past posts recorded' if history else ''}.")
+
+
+def _preview_job():
+    from datetime import date, datetime, time, timedelta, timezone
+    cfg = store.load()
+    start = date.fromisoformat(cfg["start_date"]) if cfg["start_date"] else datetime.now(timezone.utc).date()
+    now = datetime.combine(max(start, datetime.now(timezone.utc).date()) - timedelta(days=1), time(15), tzinfo=timezone.utc)
+    store.set_meta("social_preview", json.dumps({"status": "running", "at": store.now_iso(), "rows": []}))
+    try:
+        rows = planner.plan(now=now, dry=True)
+        out = [dict(_view(r, cfg), problem_list=json.loads(r["problems"] or "[]")) for r in rows]
+        store.set_meta("social_preview", json.dumps({"status": "done", "at": store.now_iso(), "rows": out}))
+    except Exception as e:
+        store.set_meta("social_preview", json.dumps({"status": f"failed: {e}", "at": store.now_iso(), "rows": []}))
+
+
+@router.post("/social/preview")
+def social_preview(request: Request):
+    """Write the first planning window's posts without saving or posting them, to check the writing."""
+    if (g := _guard(request)):
+        return g
+    threading.Thread(target=_preview_job, daemon=True).start()
+    return _back("Preview started: the first week's drafts appear below in a minute or two. Nothing is saved or posted.")
