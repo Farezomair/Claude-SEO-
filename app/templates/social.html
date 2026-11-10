@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Social · Ascend{% endblock %}
+{% block body %}
+<style>
+  .sp-row { border-top:1px solid rgba(255,255,255,.08); padding:14px 0; display:grid; grid-template-columns: 220px 1fr; gap:16px; }
+  .sp-row:first-of-type { border-top:0; }
+  .sp-row img { width:100%; border-radius:8px; border:1px solid rgba(255,255,255,.1); }
+  .sp-noimg { padding:40px 8px; text-align:center; border-radius:8px; border:1px dashed rgba(255,255,255,.2); font-size:12px; }
+  .sp-btns { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .sp-btns form { margin:0; }
+  .sp-warn { padding:10px 14px; border-radius:10px; background:rgba(255,170,0,.12); border:1px solid rgba(255,170,0,.35); }
+  textarea.sp-edit { width:100%; min-height:150px; font:13px/1.5 ui-monospace, Menlo, Consolas, monospace; }
+  .sp-form { display:grid; gap:8px; max-width:560px; }
+  .sp-form input { width:100%; }
+  table.sp { width:100%; border-collapse:collapse; font-size:13px; }
+  table.sp td, table.sp th { text-align:left; padding:6px 8px; border-top:1px solid rgba(255,255,255,.07); vertical-align:top; }
+  pre.sp-json { white-space:pre-wrap; font:12px/1.45 ui-monospace, Menlo, Consolas, monospace; max-height:280px; overflow:auto; background:rgba(0,0,0,.25); padding:10px; border-radius:8px; }
+  @media (max-width: 720px) { .sp-row { grid-template-columns: 1fr; } }
+</style>
+<div class="container wide">
+
+  <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap;">
+    <div>
+      <h1 style="margin:0 0 4px;">📣 Social</h1>
+      <p class="muted" style="margin:0;">Facebook autopilot{% if cfg.brand %} for {{ cfg.brand }}{% endif %}: new blog posts get a post on publish day, other {{ cfg.days|join(', ') }} slots get evergreen posts, at {{ cfg.time }} {{ cfg.timezone }}. Drafted {{ cfg.plan_days_ahead }} days ahead so you can skip or edit.</p>
+    </div>
+    <div class="sp-btns">
+      {% if cfg.enabled %}
+      <form method="post" action="/social/autopilot"><input type="hidden" name="on" value="0"><button class="btn">Turn autopilot off</button></form>
+      {% else %}
+      <form method="post" action="/social/autopilot"><input type="hidden" name="on" value="1"><button class="btn">Turn autopilot on</button></form>
+      {% endif %}
+      <form method="post" action="/social/plan"><button class="btn">Plan now</button></form>
+      {% if connected %}<form method="post" action="/social/test"><button class="btn">Test connection</button></form>{% endif %}
+    </div>
+  </div>
+
+  {% if msg %}<div class="card"><p style="margin:0;">{{ msg }}</p></div>{% endif %}
+
+  <div class="card {{ '' if (connected and cfg.enabled and loop_on) else 'sp-warn' }}">
+    <p style="margin:4px 0;"><b>Facebook page:</b> {% if connected %}{{ cfg.facebook.page_name }} ({{ cfg.facebook.page_id }}), connected{% else %}not connected{% endif %}</p>
+    <p style="margin:4px 0;"><b>Autopilot:</b> {{ 'ON, posts publish at their time' if cfg.enabled else 'OFF, nothing is posted' }}</p>
+    {% if not loop_on %}<p style="margin:4px 0;"><b>Background loop is off.</b> Set <code>SOCIAL_ENABLED=true</code> (or <code>OUTREACH_ENABLED=true</code>) in Railway.</p>{% endif %}
+    {% if not cfg.site %}<p style="margin:4px 0;">No settings yet: upload the settings file below.</p>{% endif %}
+  </div>
+
+  <div class="card">
+    <h2 style="margin:0 0 10px;">Upcoming ({{ upcoming|length }})</h2>
+    {% for r in upcoming %}
+    <div class="sp-row">
+      <div>{% if r.image_url %}<img src="{{ r.image_url }}" alt="">{% else %}<div class="sp-noimg muted">Link post: Facebook shows the page's preview</div>{% endif %}</div>
+      <div>
+        <p style="margin:0 0 6px;"><b>{{ r.day }}</b> · {{ r.kind.replace('_', ' ') }} · <a href="{{ r.source_url }}" target="_blank" rel="noopener">{{ r.source_title or r.source_url }}</a></p>
+        <form method="post" action="/social/edit/{{ r.id }}">
+          <textarea class="sp-edit" name="message">{{ r.message }}</textarea>
+          <p class="muted" style="margin:4px 0; font-size:12px;">Link added at the end: {{ r.link }}</p>
+          <div class="sp-btns"><button class="btn">Save edit</button></div>
+        </form>
+        <form method="post" action="/social/skip/{{ r.id }}" style="margin-top:6px;"><button class="btn">Skip this post</button></form>
+      </div>
+    </div>
+    {% else %}
+    <p class="muted">Nothing planned yet.</p>
+    {% endfor %}
+  </div>
+
+  <div class="card">
+    <h2 style="margin:0 0 10px;">History</h2>
+    <table class="sp">
+      <tr><th>Day</th><th>Status</th><th>Type</th><th>Source</th><th>Notes</th></tr>
+      {% for r in recent %}
+      <tr><td>{{ r.day }}</td><td>{{ r.status }}</td><td>{{ r.kind.replace('_', ' ') }}</td>
+        <td><a href="{{ r.source_url }}" target="_blank" rel="noopener">{{ r.source_title or r.source_url }}</a></td>
+        <td>{% if r.permalink %}<a href="{{ r.permalink }}" target="_blank" rel="noopener">view post</a> {% endif %}{{ r.error or '' }}{% for p in r.problem_list %}{{ p }}; {% endfor %}</td></tr>
+      {% else %}<tr><td colspan="5" class="muted">No posts yet.</td></tr>{% endfor %}
+    </table>
+  </div>
+
+  <div class="card">
+    <h2 style="margin:0 0 6px;">Connect the Facebook page</h2>
+    <p class="muted" style="margin:0 0 10px;">From your Meta developer app. The app secret is used once to get a page token that doesn't expire; only that page token is stored, encrypted.</p>
+    <form method="post" action="/social/connect" class="sp-form" autocomplete="off">
+      <label>App ID <input name="app_id"></label>
+      <label>App secret <input name="app_secret" type="password"></label>
+      <label>User access token (from Graph API Explorer) <input name="user_token" type="password"></label>
+      <label>Page ID (optional) <input name="page_id" value="{{ cfg.facebook.page_id }}"></label>
+      <p class="muted" style="margin:0; font-size:12px;">Or paste a page access token instead of the three fields above:</p>
+      <label>Page access token <input name="page_token" type="password"></label>
+      <div><button class="btn">Connect</button></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="margin:0 0 6px;">Settings</h2>
+    <form method="post" action="/social/upload-settings" enctype="multipart/form-data" class="sp-btns">
+      <input type="file" name="file" accept=".json" aria-label="Social settings file"><button class="btn">Upload settings (JSON, merged)</button>
+    </form>
+    <pre class="sp-json">{{ cfg_json }}</pre>
+  </div>
+</div>
+{% endblock %}

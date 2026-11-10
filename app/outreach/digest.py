@@ -64,6 +64,11 @@ def build_digest():
             c = json.loads(r["classification"] or "{}")
             lines.append(f"  {r['center']}: {c.get('category', '?')}. {c.get('summary', '')}")
         lines.append("")
+    try:
+        from ..social import planner as social_planner
+        lines += social_planner.digest_lines()
+    except Exception as e:
+        lines += [f"Facebook: status unavailable ({e})", ""]
     lines.append("Funnel:")
     for status, label in FUNNEL:
         if counts.get(status):

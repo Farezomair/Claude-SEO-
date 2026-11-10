@@ -84,8 +84,20 @@ except Exception as _e:  # never let the outreach module take Ascend down
     import traceback as _tb
     print("[outreach] module not loaded: " + "".join(_tb.format_exception(_e))[-1500:], flush=True)
 
+# Social: Facebook autopilot (own table, page and loop; off unless SOCIAL_ENABLED=true). Guarded the same way.
+try:
+    from .social import routes as social_routes
+    from .social import scheduler as social_scheduler
+
+    social_routes.templates = templates
+    app.include_router(social_routes.router)
+    social_scheduler.start()
+except Exception as _e:
+    import traceback as _tb
+    print("[social] module not loaded: " + "".join(_tb.format_exception(_e))[-1500:], flush=True)
+
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "outreach-9"
+BUILD = "social-1"
 
 
 @app.get("/version")
