@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 from . import facebook, source, store, writer
 
 DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-LIVE = ("planned", "posted")
+LIVE = ("planned", "posted", "handed")  # handed = scheduled in Meta's own planner by the Chrome task
 lock = threading.Lock()
 
 
@@ -139,9 +139,11 @@ def plan(now: datetime | None = None, dry=False) -> list:
         if now - p["published"] > timedelta(days=cfg["new_guide_max_age_days"]):
             continue
         d = max(p["published"].astimezone(_tz(cfg)).date(), today)
+        if cfg["publisher"] == "meta_planner":  # the Chrome task needs a run between drafting and posting
+            d = max(d, p["published"].astimezone(_tz(cfg)).date() + timedelta(days=1))
         for _ in range(10):
             taken = [r for r in rows if r["status"] in LIVE and _row_day(r, cfg) == d]
-            if _open_day(d, cfg) and _slot_at(d, cfg) > now and not any(r["status"] == "posted" or r["kind"] == "new_guide" for r in taken):
+            if _open_day(d, cfg) and _slot_at(d, cfg) > now and not any(r["status"] in ("posted", "handed") or r["kind"] == "new_guide" for r in taken):
                 break
             d += timedelta(days=1)
         else:
@@ -184,6 +186,12 @@ def post_due(now: datetime | None = None) -> list:
     done = []
     for r in store.posts("platform='facebook' AND status='planned' AND slot_at<=:now", now=now.isoformat()):
         late = now - datetime.fromisoformat(r["slot_at"])
+        if cfg["publisher"] == "meta_planner":  # the Chrome task should have scheduled it in Meta's planner
+            store.update(r["id"], status="missed", error="not scheduled in Meta's planner in time")
+            alert("A Facebook post was not scheduled",
+                  f"{r['slot_at']} {r['source_url']}\n\nThe Facebook scheduling task (Claude app, Scheduled) didn't "
+                  "schedule it in time. Usually the PC was off. Check the task's last run.")
+            continue
         if not cfg["enabled"] or not facebook.token():
             if late > timedelta(hours=6):
                 store.update(r["id"], status="missed", error="autopilot off or not connected")
@@ -246,13 +254,17 @@ def digest_lines() -> list[str]:
         return []
     since = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     posted = store.posts("platform='facebook' AND status='posted' AND posted_at>=:s AND post_id<>'outside Ascend'", s=since)
-    nxt = store.posts("platform='facebook' AND status='planned'", limit=3)
+    nxt = store.posts("platform='facebook' AND status IN ('planned','handed')", limit=3)
     bad = store.posts("platform='facebook' AND status IN ('failed','missed') AND created_at>=:s", s=since)
-    lines = ["Facebook: " + ("autopilot ON" if cfg["enabled"] and facebook.token() else "autopilot OFF (Ascend > Social)")]
+    meta = cfg["publisher"] == "meta_planner"
+    on = meta or (cfg["enabled"] and facebook.token())
+    lines = ["Facebook: " + (("autopilot ON" + (" (Chrome task schedules posts in Meta's planner)" if meta else ""))
+                             if on else "autopilot OFF (Ascend > Social)")]
     for r in posted:
         lines.append(f"  posted: {r['source_title'] or r['source_url']} {r['permalink'] or ''}")
     for r in nxt:
-        lines.append(f"  next {_row_day(r, cfg):%a %b %d}: {r['kind'].replace('_', ' ')}, {r['source_title'] or r['source_url']}")
+        lines.append(f"  next {_row_day(r, cfg):%a %b %d}: {r['kind'].replace('_', ' ')}, {r['source_title'] or r['source_url']}"
+                     + (" (in Meta's planner)" if r["status"] == "handed" else ""))
     for r in bad:
         lines.append(f"  PROBLEM {r['status']}: {r['source_url']} {r['error'] or r['problems']}")
     return lines + [""]

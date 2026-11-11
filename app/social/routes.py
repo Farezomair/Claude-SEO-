@@ -34,8 +34,8 @@ def social_page(request: Request, msg: str = ""):
     if (g := _guard(request)):
         return g
     cfg = store.load()
-    upcoming = [_view(r, cfg) for r in store.posts("platform='facebook' AND status='planned'")]
-    recent = [_view(r, cfg) for r in store.posts("platform='facebook' AND status<>'planned'", order="slot_at DESC", limit=30)]
+    upcoming = [_view(r, cfg) for r in store.posts("platform='facebook' AND status IN ('planned','handed')")]
+    recent = [_view(r, cfg) for r in store.posts("platform='facebook' AND status NOT IN ('planned','handed')", order="slot_at DESC", limit=30)]
     try:
         preview = json.loads(store.get_meta("social_preview") or "{}")
     except ValueError:
@@ -58,6 +58,33 @@ def social_status(request: Request):
         "upcoming": [_view(r, cfg) for r in store.posts("platform='facebook' AND status='planned'")],
         "recent": [_view(r, cfg) for r in store.posts("platform='facebook' AND status<>'planned'", order="slot_at DESC", limit=15)],
     })
+
+
+@router.get("/social/queue")
+def social_queue(request: Request):
+    """For the Chrome scheduling task: drafted posts not yet in Meta's planner, soonest first."""
+    if (g := _guard(request)):
+        return g
+    from datetime import timezone
+    cfg = store.load()
+    out = []
+    for r in store.posts("platform='facebook' AND status='planned'"):
+        at = datetime.fromisoformat(r["slot_at"])
+        out.append({"id": r["id"], "slot_utc": at.astimezone(timezone.utc).isoformat(),
+                    "slot_local": at.astimezone(planner._tz(cfg)).strftime("%Y-%m-%d %H:%M ") + cfg["timezone"],
+                    "kind": r["kind"], "source_url": r["source_url"], "source_title": r["source_title"],
+                    "text": r["message"].strip() + (f"\n\n{r['link']}" if r["link"] else ""),
+                    "image_url": r["image_url"] or "", "image_file": (r["image_url"] or "").rsplit("/", 1)[-1]})
+    return JSONResponse({"publisher": cfg["publisher"], "page": cfg["facebook"].get("page_name"), "posts": out})
+
+
+@router.post("/social/handed/{pid}")
+def social_handed(request: Request, pid: int):
+    """The Chrome task scheduled this post in Meta's planner."""
+    if (g := _guard(request)):
+        return g
+    store.update(pid, status="handed", posted_at=store.now_iso())
+    return _back(f"Post {pid} marked as scheduled in Meta's planner.")
 
 
 @router.post("/social/connect")

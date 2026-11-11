@@ -38,9 +38,13 @@
 
   {% if msg %}<div class="card"><p style="margin:0;">{{ msg }}</p></div>{% endif %}
 
-  <div class="card {{ '' if (connected and cfg.enabled and loop_on) else 'sp-warn' }}">
+  <div class="card {{ '' if (((connected and cfg.enabled) or cfg.publisher == 'meta_planner') and loop_on) else 'sp-warn' }}">
     <p style="margin:4px 0;"><b>Facebook page:</b> {% if connected %}{{ cfg.facebook.page_name }} ({{ cfg.facebook.page_id }}), connected{% else %}not connected{% endif %}</p>
+    {% if cfg.publisher == 'meta_planner' %}
+    <p style="margin:4px 0;"><b>Publishing:</b> a scheduled task in the Claude app puts each draft into Meta's own planner through Chrome; Meta publishes it at its time.</p>
+    {% else %}
     <p style="margin:4px 0;"><b>Autopilot:</b> {{ 'ON, posts publish at their time' if cfg.enabled else 'OFF, nothing is posted' }}</p>
+    {% endif %}
     {% if not loop_on %}<p style="margin:4px 0;"><b>Background loop is off.</b> Set <code>SOCIAL_ENABLED=true</code> (or <code>OUTREACH_ENABLED=true</code>) in Railway.</p>{% endif %}
     {% if not cfg.site %}<p style="margin:4px 0;">No settings yet: upload the settings file below.</p>{% endif %}
   </div>
@@ -51,13 +55,19 @@
     <div class="sp-row">
       <div>{% if r.image_url %}<img src="{{ r.image_url }}" alt="">{% else %}<div class="sp-noimg muted">Link post: Facebook shows the page's preview</div>{% endif %}</div>
       <div>
-        <p style="margin:0 0 6px;"><b>{{ r.day }}</b> · {{ r.kind.replace('_', ' ') }} · <a href="{{ r.source_url }}" target="_blank" rel="noopener">{{ r.source_title or r.source_url }}</a></p>
+        <p style="margin:0 0 6px;"><b>{{ r.day }}</b> · {{ r.kind.replace('_', ' ') }} · {{ "in Meta's planner" if r.status == 'handed' else 'drafted' }} · <a href="{{ r.source_url }}" target="_blank" rel="noopener">{{ r.source_title or r.source_url }}</a></p>
+        {% if r.status == 'handed' %}<p class="muted" style="margin:0 0 6px; font-size:12px;">Already scheduled in Meta's planner: edit or delete it there (facebook.com/professional_dashboard/content_calendar).</p>{% endif %}
         <form method="post" action="/social/edit/{{ r.id }}">
           <textarea class="sp-edit" name="message">{{ r.message }}</textarea>
           <p class="muted" style="margin:4px 0; font-size:12px;">Link added at the end: {{ r.link }}</p>
           <div class="sp-btns"><button class="btn">Save edit</button></div>
         </form>
-        <form method="post" action="/social/skip/{{ r.id }}" style="margin-top:6px;"><button class="btn">Skip this post</button></form>
+        {% if r.status != 'handed' %}
+        <div class="sp-btns" style="margin-top:6px;">
+          <form method="post" action="/social/skip/{{ r.id }}"><button class="btn">Skip this post</button></form>
+          {% if cfg.publisher == 'meta_planner' %}<form method="post" action="/social/handed/{{ r.id }}"><button class="btn">Scheduled in Meta</button></form>{% endif %}
+        </div>
+        {% endif %}
       </div>
     </div>
     {% else %}

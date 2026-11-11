@@ -97,7 +97,7 @@ except Exception as _e:
     print("[social] module not loaded: " + "".join(_tb.format_exception(_e))[-1500:], flush=True)
 
 # Bumped on each deploy so we can confirm which build is live (public, no auth).
-BUILD = "social-2"
+BUILD = "social-3"
 
 
 @app.get("/version")

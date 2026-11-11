@@ -15,9 +15,10 @@ Table("social_posts", metadata,
           "platform", "kind", "source_url", "source_title", "slot_at", "message", "image_url", "link",
           "status", "problems", "post_id", "permalink", "error", "created_at", "posted_at")])
 
-# status: planned (drafted, posts itself at slot_at) | posted | skipped (owner) | failed | missed | superseded
+# status: planned (drafted) | handed (scheduled in Meta's planner) | posted | skipped (owner) | failed | missed | superseded
 DEFAULTS = {
     "enabled": False,
+    "publisher": "ascend",  # ascend = Graph API posting; meta_planner = a Chrome task schedules drafts in Meta's planner
     "site": "",
     "brand": "",
     "audience": "",
