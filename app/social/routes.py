@@ -55,8 +55,9 @@ def social_status(request: Request):
     return JSONResponse({
         "loop_on": scheduler.ENABLED, "autopilot": cfg["enabled"], "connected": bool(facebook.token()),
         "page": cfg["facebook"].get("page_name"), "site": cfg["site"],
-        "upcoming": [_view(r, cfg) for r in store.posts("platform='facebook' AND status='planned'")],
-        "recent": [_view(r, cfg) for r in store.posts("platform='facebook' AND status<>'planned'", order="slot_at DESC", limit=15)],
+        "publisher": cfg["publisher"],
+        "upcoming": [_view(r, cfg) for r in store.posts("platform='facebook' AND status IN ('planned','handed')")],
+        "recent": [_view(r, cfg) for r in store.posts("platform='facebook' AND status NOT IN ('planned','handed')", order="slot_at DESC", limit=15)],
     })
 
 
