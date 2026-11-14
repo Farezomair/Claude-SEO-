@@ -53,7 +53,7 @@
   </div>
 
   <div class="card">
-    <h2 style="margin:0 0 10px;">Funnel <span class="muted" style="font-size:13px;">{{ total }} prospects · first send: {{ first_send or "not yet" }} · up to {{ limits.ramp[0].new_per_day }} new a day, {{ limits.window_start }} to {{ limits.window_end }} ET</span></h2>
+    <h2 style="margin:0 0 10px;">Funnel <span class="muted" style="font-size:13px;">{{ total }} prospects · first send: {{ first_send or "not yet" }} · up to {{ per_day if per_day is not none else limits.ramp[0].new_per_day }} new a day today, {{ limits.window_start }} to {{ limits.window_end }} ET</span></h2>
     <div class="ob-grid">
       {% for label, n in funnel %}<div class="ob-stat"><b>{{ n }}</b><span class="muted">{{ label }}</span></div>{% endfor %}
     </div>

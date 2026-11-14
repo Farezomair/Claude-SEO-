@@ -82,8 +82,16 @@ def outreach_page(request: Request, msg: str = ""):
         "first_send": first_send, "funnel": funnel, "total": sum(counts.values()), "review": review,
         "ready": ready, "needs_you": needs_you, "replies": replies, "sent": sent, "events": events,
         "sender": cfg["sender"], "company": cfg["company"], "limits": cfg["limits"],
-        "labels": STATUS_LABELS, "research_next": research_queue(8), "health": _health_safe(),
+        "labels": STATUS_LABELS, "research_next": research_queue(8), "health": _health_safe(), "per_day": _per_day_safe(),
     })
+
+
+def _per_day_safe():
+    try:
+        with db.connect() as con:
+            return sequence.daily_new_target(con)
+    except Exception:
+        return None
 
 
 @router.post("/outreach/upload-prospects")
