@@ -27,17 +27,51 @@ def sent_today(con) -> list:
     return con.execute("SELECT * FROM messages WHERE direction='out' AND status='sent' AND sent_at>=?", (start,)).fetchall()
 
 
-def new_quota(con) -> int:
+def daily_new_target(con, day: date | None = None) -> int:
+    """New first emails per day. Ramp steps are either {"from": "YYYY-MM-DD", "new_per_day": n}
+    (the last step whose date has arrived wins) or the older {"week": n, "new_per_day": n}."""
     lim = config.load()["limits"]
+    ramp = lim.get("ramp") or [{"week": 1, "new_per_day": 2}]
+    day = day or now_et().date()
+    dated = [s for s in ramp if s.get("from")]
+    if dated:
+        quota = dated[0]["new_per_day"]
+        for step in sorted(dated, key=lambda s: s["from"]):
+            if date.fromisoformat(step["from"]) <= day:
+                quota = step["new_per_day"]
+        return int(quota)
     first = db.get_meta(con, "first_send_date")
-    week = 1 if not first else (now_et().date() - date.fromisoformat(first)).days // 7 + 1
-    quota = lim["ramp"][-1]["new_per_day"]
-    for step in lim["ramp"]:
-        if week <= step["week"]:
+    week = 1 if not first else (day - date.fromisoformat(first)).days // 7 + 1
+    quota = ramp[-1]["new_per_day"]
+    for step in ramp:
+        if week <= step.get("week", 1):
             quota = step["new_per_day"]
             break
+    return int(quota)
+
+
+def new_quota(con) -> int:
     done = sum(1 for m in sent_today(con) if m["kind"] == "email1")
-    return max(0, quota - done)
+    return max(0, daily_new_target(con) - done)
+
+
+def fu1_opener(fields: dict) -> str:
+    """Day-4 opener. If the research left a recheck (page + text that is only there while the problem is),
+    reload the page now and say honestly whether they fixed it."""
+    still = (fields.get("fu1_line") or "").strip()
+    fixed = (fields.get("fu1_fixed_line") or "").strip()
+    chk = fields.get("recheck") or {}
+    if chk.get("url") and chk.get("contains") and fixed:
+        try:
+            import requests
+            r = requests.get(chk["url"], timeout=20, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"})
+            if r.status_code == 200:
+                return still if chk["contains"].lower() in r.text.lower() else fixed
+        except Exception:
+            pass
+        return templates.FU1_NEUTRAL  # couldn't load the page: claim nothing about it
+    return still or templates.FU1_NEUTRAL
 
 
 def total_left(con) -> int:
@@ -59,7 +93,7 @@ def queue_status(con) -> dict:
     """How many send days the ready first emails cover."""
     lim = config.load()["limits"]
     ready = len(ready_first_emails(con, 1000))
-    per_day = lim["ramp"][0]["new_per_day"] if lim.get("ramp") else 2
+    per_day = daily_new_target(con)
     return {"ready": ready, "send_days_covered": ready // max(1, per_day), "per_day": per_day}
 
 
@@ -225,9 +259,8 @@ def run_send(dry_run=False, wait=True, process_inbox=None):
                 if kind == "fu1":
                     notes = con.execute("SELECT review_notes FROM messages WHERE prospect_id=? AND kind='email1' AND status='sent'",
                                         (p["id"],)).fetchone()
-                    extra["fu1_line"] = json.loads(notes["review_notes"] or "{}").get("fields", {}).get("fu1_line", "").strip() if notes else ""
-                    if not extra["fu1_line"]:
-                        extra["fu1_line"] = "The first thing I'd fix is the page families land on first."
+                    fields = json.loads(notes["review_notes"] or "{}").get("fields", {}) if notes else {}
+                    extra["fu1_line"] = fu1_opener(fields)
                 subject, body = templates.render(kind, **slots_for(con, fresh, **extra))
             ok = send_message(con, fresh, kind, subject, body, dry_run=dry_run,
                               review_notes=p["m_notes"] if kind == "email1" else None)

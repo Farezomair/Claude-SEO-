@@ -17,7 +17,7 @@ router = APIRouter()
 templates = None  # set by main.py so the page shares Ascend's Jinja environment and filters
 
 STATUS_LABELS = {
-    "audit_requested": "Said yes: audit to build", "needs_owner": "Waiting on your reply",
+    "audit_requested": "Said yes: audit to build", "warm": "Said thanks (warm)", "needs_owner": "Waiting on your reply",
     "handed_off": "Handed to you", "audit_sent": "Audit sent", "pa_fu1_sent": "Audit sent, followed up",
     "email1_sent": "First email sent", "fu1_sent": "Follow-up 1 sent", "sequence_finished": "No reply, finished",
     "later": "Not now", "ooo": "Out of office", "dnc": "Do not contact", "bounced": "Bounced",
@@ -167,7 +167,10 @@ async def upload_research(request: Request, file: UploadFile = File(...)):
 
     {"prospects": [{"id": 6, "checks": [{query, location, maps_top, prospect_in_maps, organic_top,
       prospect_organic, notes}], "first_name": "Eric", "first_name_source": "...",
-      "email": {"subject": "...", "core": "<paragraphs between greeting and signature>", "fu1_line": "..."}}]}
+      "email": {"subject": "...", "core": "<paragraphs between greeting and signature>",
+                "fu1_line": "<day-4 opener if the problem is still there>",
+                "fu1_fixed_line": "<day-4 opener if they fixed it>",
+                "recheck": {"url": "<page to reload on day 4>", "contains": "<text present only while the problem is>"}}}]}
     """
     if (r := _guard(request)):
         return r
@@ -198,11 +201,13 @@ async def upload_research(request: Request, file: UploadFile = File(...)):
             continue
         slots = tmpl.base_slots(cfg)
         slots.update(name=item.get("first_name") or p["first_name"] or "there")
-        body = f"Hi {slots['name']},\n\n{em['core'].strip()}\n\n" + tmpl.FOOTER.format(**slots)
+        body = f"{tmpl.greeting(slots['name'])},\n\n{em['core'].strip()}\n\n" + tmpl.FOOTER.format(**slots)
         problems = rules.check("email1", em["subject"], body, slots)
         status = "approved" if not problems else "needs_review"
         notes = {"problems": problems, "source": "written in a Claude session from live Google checks",
-                 "fields": {"fu1_line": em.get("fu1_line", "")}, "review": {"score": em.get("score")}}
+                 "fields": {"fu1_line": em.get("fu1_line", ""), "fu1_fixed_line": em.get("fu1_fixed_line", ""),
+                            "recheck": em.get("recheck") or {}},
+                 "review": {"score": em.get("score")}}
         with db.connect() as con:
             con.execute("DELETE FROM messages WHERE prospect_id=? AND kind='email1' AND status IN ('draft','needs_review','approved')", (pid,))
             con.execute("""INSERT INTO messages(prospect_id,kind,direction,status,to_addr,from_addr,subject,body,review_notes,created_at)

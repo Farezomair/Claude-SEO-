@@ -1,65 +1,68 @@
 """The approved email templates. Approve these once; the agent only fills the {slots}.
 
 Written for owners and admissions staff, not marketers: everyday words, no SEO jargon.
-Rules baked in: plain text, no links in the cold emails apart from the company domain, no
-attachments before they say yes, no em dashes, mailing address and opt-out line in
-every cold email.
+Format approved by the owner on 2026-11-15: the first email openly says it's a cold email,
+gives one real fix for free and asks for nothing. The follow-up rechecks their site and offers
+to write up more. Rules baked in: plain text, no links apart from the company domain, no
+attachments before they say yes, no em dashes, mailing address and opt-out line in every
+cold email, no stock AI phrases (see rules.BANNED).
 """
 
-FOOTER = """{sender_full}
-{company} | {tagline}
-{website}
-{address}
+OPT_OUT = "If I'm bothering you, or you think I've got this wrong, just say so and I won't write again."
 
-If this isn't relevant, just reply "no" and I won't follow up."""
+FOOTER = """{sender_first}
+{company}
 
-SHORT_FOOTER = """{company}, {address}
-Reply "no" and I won't email again."""
+""" + OPT_OUT + """
+{company}, {address}"""
 
-# The offer paragraph rotates between approved versions so no two emails in a batch read the same.
-OFFERS = [
-    """I do local search for treatment centers. If it's useful, I'll send you a free one-page breakdown: what a family in {area} sees when they search for {service_phrase}, where {center} shows up, and the first three things I'd fix. By email within two days, no call needed. Want it?""",
-    """I do local search for treatment centers. Happy to send a free one-page breakdown for {center}: who a family in {area} finds when they search for {service_phrase}, where you come up, and what I'd fix first. It comes by email within two days, no call needed. Should I send it?""",
-    """I do local search for treatment centers, and I'd be glad to send {center} a free one-page breakdown: what comes up when someone in {area} searches for {service_phrase}, where you land, and the first three fixes I'd make. By email, no call needed. Want me to?""",
-]
+SHORT_FOOTER = """{sender_first}
+{company}
+
+If I'm bothering you, just say so and I won't write again.
+{company}, {address}"""
+
+# Used when the day-4 recheck of their site can't load the page.
+FU1_NEUTRAL = "I had another look at your site this week."
 
 TEMPLATES = {
     "email1": {
         "subject": "{subject}",
-        "body": """Hi {name},
+        "body": """{hey},
 
 {opening}
-
-{offer}
 
 """ + FOOTER,
     },
     "fu1": {
         "subject": "Re: {thread_subject}",
-        "body": """Hi {name},
+        "body": """{hey},
 
-One more thought on {center}. {fu1_line}
+{fu1_line}
 
-The free one-page breakdown is still yours if you want it. Just reply "yes" and I'll put it together.
-
-{sender_first}
+If you want, I'll also check the other searches families use to find a place like {center} and write up what I find, by email. Just say yes.
 
 """ + SHORT_FOOTER,
     },
     "fu2": {
         "subject": "Re: {thread_subject}",
-        "body": """Hi {name},
+        "body": """{hey},
 
-I'll leave it here so I'm not cluttering your inbox. If getting more calls from Google becomes a priority for {center}, the free breakdown is yours. Just reply "send it".
-
-All the best,
-{sender_first}
+Last one from me, I promise. If getting more calls from Google ever moves up the list for {center}, just reply and I'll send over what I found.
 
 """ + SHORT_FOOTER,
     },
+    "thanks_ack": {
+        "subject": "Re: {thread_subject}",
+        "body": """{hey},
+
+Glad it helps. If you want, I'll check the other searches families use to find a place like {center} and send you what I find, by email. Just say yes.
+
+{sender_first}""",
+    },
     "ack": {
         "subject": "Re: {thread_subject}",
-        "body": """Hi {name},
+        "body": """{hey},
 
 Great, thank you. I'll put it together and send it over within 2 business days.
 
@@ -67,7 +70,7 @@ Great, thank you. I'll put it together and send it over within 2 business days.
     },
     "audit": {
         "subject": "Re: {thread_subject}",
-        "body": """Hi {name},
+        "body": """{hey},
 
 Here it is: the one-page breakdown for {center} (attached). If you only fix one thing, I'd start here: {first_fix}
 
@@ -77,7 +80,7 @@ If you'd like to walk through it together, you can grab a free 30-minute slot he
     },
     "pa_fu1": {
         "subject": "Re: {thread_subject}",
-        "body": """Hi {name},
+        "body": """{hey},
 
 Did you get a chance to look at the breakdown? Happy to answer any questions about it, or walk through it on a quick call: {calendly}
 
@@ -85,7 +88,7 @@ Did you get a chance to look at the breakdown? Happy to answer any questions abo
     },
     "pa_fu2": {
         "subject": "Re: {thread_subject}",
-        "body": """Hi {name},
+        "body": """{hey},
 
 Last note from me on this. If you want a hand fixing what's in the breakdown, just reply and we'll take it from there.
 
@@ -94,7 +97,7 @@ All the best,
     },
     "later_ack": {
         "subject": "Re: {thread_subject}",
-        "body": """Hi {name},
+        "body": """{hey},
 
 Understood, thanks for letting me know. I'll check back in a few months.
 
@@ -107,10 +110,14 @@ Understood, thanks for letting me know. I'll check back in a few months.
 }
 
 
+def greeting(name: str) -> str:
+    name = (name or "").strip()
+    return "Hey" if not name or name == "there" else f"Hey {name}"
+
+
 def render(kind: str, **slots) -> tuple[str, str]:
     t = TEMPLATES[kind]
-    if kind == "email1" and "offer" not in slots:
-        slots["offer"] = OFFERS[slots.get("offer_index", 0) % len(OFFERS)].format(**slots)
+    slots.setdefault("hey", greeting(slots.get("name", "")))
     return t["subject"].format(**slots), t["body"].format(**slots)
 
 

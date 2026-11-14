@@ -12,15 +12,16 @@ from pydantic import BaseModel, Field
 from . import config, db, llm, mailer, sequence, templates
 
 ACTIVE = ("email1_sent", "fu1_sent", "sequence_finished", "audit_requested", "audit_sent", "pa_fu1_sent",
-          "handed_off", "ooo", "later", "needs_owner", "replied")
+          "handed_off", "ooo", "later", "needs_owner", "replied", "warm")
 
 
 class ReplyClass(BaseModel):
     category: Literal["interested", "question", "not_now", "unsubscribe", "wrong_person", "out_of_office",
-                      "auto_reply", "call_request", "other"] = Field(
+                      "auto_reply", "call_request", "thanks", "other"] = Field(
         description="interested = yes / send it / sounds good; call_request = wants to talk or book a call; "
                     "question = asks something (price, process, who we are); not_now = maybe later; "
                     "unsubscribe = no / remove me / not interested / stop; wrong_person = not them, maybe names who to ask; "
+                    "thanks = only thanks them for the tip or says they will fix it, with no question and no request; "
                     "out_of_office = away message; auto_reply = ticket confirmation or other automatic message; "
                     "other = anything else")
     summary: str = Field(description="one plain sentence on what they said")
@@ -30,7 +31,7 @@ class ReplyClass(BaseModel):
     contains_patient_info: bool = Field(description="true if the message includes any information about a patient or a person's health or treatment")
 
 
-SYSTEM = """You sort replies to cold emails from a small SEO agency for addiction treatment centers. The emails offered a free 1-page review of how the center shows up on Google. Classify the reply. Quoted text from our own earlier emails is not part of their reply; judge only what they wrote."""
+SYSTEM = """You sort replies to cold emails from a small SEO agency for addiction treatment centers. The first email pointed out one problem on their website or Google results and gave the fix for free; follow-ups offer to check more searches and write it up. Classify the reply. Quoted text from our own earlier emails is not part of their reply; judge only what they wrote."""
 
 
 def _dec(v):
@@ -211,6 +212,14 @@ def handle_reply(con, p, msg, from_addr, verbose):
         reply_with(con, p, "later_ack")
         later = (sequence.now_et().date() + timedelta(days=cfg["sequence"]["later_recontact_days"])).isoformat()
         db.set_status(con, p["id"], "later", next_action_at=later, note="not now")
+        return
+    if cat == "thanks" and p["status"] in ("email1_sent", "fu1_sent", "sequence_finished"):
+        reply_with(con, p, "thanks_ack")
+        db.set_status(con, p["id"], "warm", note=f"thanked us: {c.summary}")
+        alert(f"Warm reply: {p['center']} said thanks",
+              f"{p['center']} ({p['website']}) replied to the cold email.\n\nThey wrote: {c.summary}\n\n"
+              f"The agent already answered and offered to check their other searches. If they say yes, the audit "
+              f"task builds and sends the breakdown on its own. Nothing to do unless you want to step in.")
         return
     if cat == "interested" and not after_audit and p["status"] != "audit_requested":
         reply_with(con, p, "ack")

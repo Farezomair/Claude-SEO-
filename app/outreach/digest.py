@@ -6,6 +6,7 @@ from . import config, db, mailer, sequence
 
 FUNNEL = [
     ("audit_requested", "Said yes, audit to build"),
+    ("warm", "Said thanks, offered more (warm)"),
     ("needs_owner", "Waiting on your reply"),
     ("handed_off", "Handed to you (call or post-audit reply)"),
     ("audit_sent", "Audit sent, follow-ups running"),

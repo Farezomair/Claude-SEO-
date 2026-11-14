@@ -6,6 +6,10 @@ BANNED = [
     "game changer", "limited time", "act now", "urgent", "don't miss", "patient", "patients", "outcome",
     "outcomes", "cure", "recovery rate", "success rate", "case study", "case studies", "our clients",
     "dominate", "crush", "10x", "best in", "world-class", "cutting-edge", "synergy", "leverage",
+    # stock AI cold-email phrases (owner, 2026-11-15: every AI-written pitch uses these)
+    "i do local search", "one-page breakdown", "no call needed", "quick walkthrough", "worth 20 minutes",
+    "reply \"no\"", "hope this finds you", "i wanted to reach out", "i came across", "just following up",
+    "circling back", "touch base", "quick question",
 ]
 DASHES = ["—", "–", " - ", "--"]
 
@@ -18,7 +22,7 @@ def _cfg():
 def sign_offs():
     s = _cfg()["sender"]
     return ("All the best,", s.get("first_name") or "", s.get("name") or "")
-WORD_LIMITS = {"email1": 150}  # everything else: 120
+WORD_LIMITS = {"email1": 165}  # everything else: 120
 
 # Words an owner or admissions director shouldn't have to decode in the opening.
 JARGON = ["seo", "h1", "meta", "keyword", "serp", "backlink", "rank", "ranking", "rankings", "indexed",
@@ -64,8 +68,10 @@ def check(kind: str, subject: str, body: str, slots: dict) -> list[str]:
         addr = (cfg["company"].get("mailing_address") or "").split(",")[0]
         if not addr or addr not in body:
             problems.append("mailing address missing")
-        if 'reply "no"' not in body.lower():
+        if "won't write again" not in body.lower():
             problems.append("opt-out line missing")
+    if kind == "email1" and "cold email" not in body.lower():
+        problems.append("the first email must say plainly that it's a cold email")
     n = body_words(body)
     if n > WORD_LIMITS.get(kind, 120):
         problems.append(f"{n} words (limit {WORD_LIMITS.get(kind, 120)})")

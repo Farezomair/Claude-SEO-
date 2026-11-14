@@ -41,9 +41,9 @@ class OwnerReview(BaseModel):
 
 SYSTEM = """You write the first cold email from {sender} at {company} to a US addiction treatment or behavioral health center.
 
-Who reads it: the owner, executive director, admissions or business development lead. Busy, skeptical, gets agency spam every week, not a marketer. They reply to an email that (1) proves a real person checked THEIR searches and site, (2) tells them something useful they didn't know, and (3) offers something specific and free that is easy to say yes to.
+Who reads it: the owner, executive director, admissions or business development lead. Busy, skeptical, gets agency spam every week, not a marketer. They reply to an email that (1) proves a real person checked THEIR searches and site, (2) tells them something useful they didn't know, and (3) hands them one fix for free, with no ask, so it reads like a helpful note from a person.
 
-You fill the variable parts. The template adds a fixed offer paragraph after yours: "I do local search for treatment centers. If it's useful, I'll send you a free one-page breakdown: what a family in <area> sees when they search for <service_phrase>, where <center> shows up, and the first three things I'd fix. By email within two days, no call needed. Want it?" So do not introduce us or make an offer yourself.
+You write everything between the greeting ("Hey," or "Hey <name>,") and the signature. The opening is the owner's approved format: the first sentence says plainly that this is a cold email (for example "This is a cold email, so I'll keep it short." or "This is a cold email, but I think you'll want to know this one."), then goes straight to the one problem ("I just wanted you to know that..."). Then how you noticed it (the live search). Then the fix in one or two plain sentences, saying who can do it ("whoever handles your website"). End with "Hope it helps." No offer, no audit, no call, no question, no introduction of us: the signature says who we are.
 
 How the opening works (this is what gets replies):
 - Lead with one real live Google result: the search in quotes, that you ran it not logged in from a <city> location, exactly where the center landed (the position the data gives, e.g. "#14, on page two", or "not in the top 20"), and who took the top Google Maps spots. Use short business names (e.g. "Second Chances", not "Second Chances Addiction Recovery Center") and at most two or three names in total.
@@ -71,7 +71,7 @@ Mark skip when the center is a hospital, a large chain or national brand (market
 
 REVIEWER = """You are the owner of a small addiction treatment center. You get several cold emails a week from marketing agencies and ignore almost all of them. Read this cold email as you really would, and judge how likely you are to reply "yes, send it".
 
-You reply when the email clearly shows someone checked YOUR searches and site, tells you something specific and useful, sounds like a real person, is short, and the free offer is concrete and easy to accept. You ignore anything generic, salesy, long, vague, AI-sounding, or that feels like a trick.
+You reply when the email clearly shows someone checked YOUR searches and site, tells you something specific and useful, sounds like a real person, is short, and gives a fix you could act on today without asking for anything. You ignore anything generic, salesy, long, vague, AI-sounding, or that feels like a trick.
 
 Fixed constraints you must accept and not ask to change: no links in a first email apart from the sender's own domain in the signature, no claims of past clients or case studies (none yet), the company name, the sign-off, the mailing address and the opt-out line are required.
 
