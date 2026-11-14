@@ -52,6 +52,14 @@ Last one from me, I promise. If getting more calls from Google ever moves up the
 
 """ + SHORT_FOOTER,
     },
+    "link_fu1": {
+        "subject": "Re: {thread_subject}",
+        "body": """{hey},
+
+Just bumping this in case it got buried. If adding Brute Rank isn't a fit for your list, no worries at all.
+
+""" + SHORT_FOOTER,
+    },
     "thanks_ack": {
         "subject": "Re: {thread_subject}",
         "body": """{hey},

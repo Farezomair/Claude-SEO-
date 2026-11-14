@@ -208,10 +208,17 @@ def handle_reply(con, p, msg, from_addr, verbose):
         back = c.return_date or (sequence.now_et().date() + timedelta(days=7)).isoformat()
         db.set_status(con, p["id"], "ooo", next_action_at=back, note=f"resume: {p['status']}")
         return
-    if cat == "not_now":
+    if cat == "not_now" and not sequence.is_link(p):
         reply_with(con, p, "later_ack")
         later = (sequence.now_et().date() + timedelta(days=cfg["sequence"]["later_recontact_days"])).isoformat()
         db.set_status(con, p["id"], "later", next_action_at=later, note="not now")
+        return
+    if sequence.is_link(p):  # link-building contacts: a person answers every real reply
+        db.set_status(con, p["id"], "needs_owner", note=f"link outreach reply ({cat}): {c.summary}")
+        alert(f"Link outreach: {p['center']} replied ({cat.replace('_', ' ')})",
+              f"{p['center']} ({p['website']}) replied to the request to be added to their list.\n\n"
+              f"Summary: {c.summary}\n\nTheir message:\n{stored}\n\n"
+              f"Nothing was sent automatically. If they ask for payment, the answer is no (free listings only).")
         return
     if cat == "thanks" and p["status"] in ("email1_sent", "fu1_sent", "sequence_finished"):
         reply_with(con, p, "thanks_ack")

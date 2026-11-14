@@ -50,9 +50,31 @@ def daily_new_target(con, day: date | None = None) -> int:
     return int(quota)
 
 
+LINK = "Link outreach"  # prospects with this website_check are link-building contacts, not treatment centers
+
+
+def is_link(p) -> bool:
+    try:
+        return (p["website_check"] or "") == LINK
+    except (KeyError, IndexError):
+        return False
+
+
+def _first_emails_sent_today(con, link: bool) -> int:
+    start = now_et().replace(hour=0, minute=0, second=0, microsecond=0).astimezone(ZoneInfo("UTC")).isoformat()
+    op = "=" if link else "<>"
+    return con.execute(f"""SELECT COUNT(*) AS n FROM messages m JOIN prospects p ON p.id=m.prospect_id
+        WHERE m.direction='out' AND m.status='sent' AND m.kind='email1' AND m.sent_at>=?
+          AND COALESCE(p.website_check,'') {op} ?""", (start, LINK)).fetchone()["n"]
+
+
 def new_quota(con) -> int:
-    done = sum(1 for m in sent_today(con) if m["kind"] == "email1")
-    return max(0, daily_new_target(con) - done)
+    return max(0, daily_new_target(con) - _first_emails_sent_today(con, link=False))
+
+
+def link_quota(con) -> int:
+    per_day = int(config.load()["limits"].get("link_new_per_day", 2))
+    return max(0, per_day - _first_emails_sent_today(con, link=True))
 
 
 def fu1_opener(fields: dict) -> str:
@@ -166,6 +188,10 @@ def due_followups(con):
     ]
     for status, anchor, days, kind, next_status in rules_:
         for p in con.execute("SELECT * FROM prospects WHERE status=?", (status,)).fetchall():
+            if is_link(p):  # link contacts get one gentle nudge after a week, then nothing
+                if kind != "fu1":
+                    continue
+                days, kind, next_status = max(days, 7), "link_fu1", "sequence_finished"
             t0 = first_sent_at(con, p["id"], anchor)
             if t0 and (today - t0.date()).days >= days:
                 due.append((p, kind, next_status))
@@ -177,7 +203,7 @@ def due_followups(con):
     return due
 
 
-def ready_first_emails(con, limit):
+def ready_first_emails(con, limit, link=False):
     cfg = config.load()
     tgt = cfg["targeting"]
     need = "('draft','approved')" if cfg.get("auto_send") else "('approved')"
@@ -185,6 +211,7 @@ def ready_first_emails(con, limit):
         FROM prospects p JOIN messages m ON m.prospect_id=p.id
         WHERE m.kind='email1' AND m.direction='out' AND m.status IN {need}
           AND p.status IN ('drafted','approved')""").fetchall()
+    rows = [r for r in rows if is_link(r) == link]
     pr = {v: i for i, v in enumerate(tgt["priority_order"])}
     st = {v: i for i, v in enumerate(tgt["state_order"])}
     rows = sorted(rows, key=lambda r: (pr.get(r["priority"], 9), st.get((r["state"] or "")[:2], 9), r["id"]))
@@ -230,6 +257,8 @@ def run_send(dry_run=False, wait=True, process_inbox=None):
         if dayname in lim["new_email_days"]:
             for r in ready_first_emails(con, new_quota(con)):
                 queue.append(("new", r, "email1", "email1_sent"))
+            for r in ready_first_emails(con, link_quota(con), link=True):
+                queue.append(("new", r, "email1", "email1_sent"))
         queue = queue[:total_left(con)]
     print(f"{len(queue)} emails due ({sum(1 for q in queue if q[0]=='fu')} follow-ups, "
           f"{sum(1 for q in queue if q[0]=='new')} first emails).")
@@ -246,7 +275,7 @@ def run_send(dry_run=False, wait=True, process_inbox=None):
                 print(f"Paused: {paused(con)}")
                 break
             fresh = con.execute("SELECT * FROM prospects WHERE id=?", (p["id"],)).fetchone()
-            expected = {"fu1": "email1_sent", "fu2": "fu1_sent", "pa_fu1": "audit_sent", "pa_fu2": "pa_fu1_sent",
+            expected = {"fu1": "email1_sent", "link_fu1": "email1_sent", "fu2": "fu1_sent", "pa_fu1": "audit_sent", "pa_fu2": "pa_fu1_sent",
                         "email1": None}[kind]
             if expected and fresh["status"] != expected:
                 continue  # they replied or something changed since we queued
